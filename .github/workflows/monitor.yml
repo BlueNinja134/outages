@@ -2,11 +2,11 @@ name: Outage Monitor
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # Runs every 10 minutes
-  workflow_dispatch: # Allows manual testing from the Actions tab
+    - cron: '*/5 * * * *' # Runs every 5 minutes (GitHub's fastest interval)
+  workflow_dispatch:
 
 permissions:
-  contents: write # Needed only for the monthly keep-alive commit
+  contents: write
 
 jobs:
   check-status:
@@ -33,7 +33,6 @@ jobs:
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
         run: python monitor.py
 
-      # Resets GitHub's 60-day public repo inactivity timer on the 1st of each month
       - name: Keep workflow alive (Monthly)
         if: always()
         run: |
