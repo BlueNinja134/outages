@@ -1,0 +1,47 @@
+name: Outage Monitor
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Runs every 10 minutes
+  workflow_dispatch: # Allows manual testing from the Actions tab
+
+permissions:
+  contents: write # Needed only for the monthly keep-alive commit
+
+jobs:
+  check-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install discord.py
+
+      - name: Run outage monitor
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MONITOR_BOT_TOKEN: ${{ secrets.MONITOR_BOT_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+          BOT_IDS: ${{ secrets.BOT_IDS }}
+          WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
+          MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
+        run: python monitor.py
+
+      # Resets GitHub's 60-day public repo inactivity timer on the 1st of each month
+      - name: Keep workflow alive (Monthly)
+        if: always()
+        run: |
+          if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "00" ]; then
+            date -u > .keepalive
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@://github.com"
+            git add .keepalive
+            git commit -m "Keep scheduled workflow active" || exit 0
+            git push
+          fi
