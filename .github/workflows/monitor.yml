@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install discord.py
+        run: pip install requests dnspython discord.py
 
       - name: Run outage monitor
         env:
@@ -38,7 +38,7 @@ jobs:
         if: always()
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@://github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "00" ]; then
             date -u > .keepalive
