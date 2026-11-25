@@ -251,7 +251,7 @@ def post_webhook(content, embeds):
         return
     
     payload = {
-        "username": "System Watchdog",
+        "username": "Outages",
         "embeds": embeds,
     }
     if content:
@@ -318,7 +318,7 @@ async def main():
             "description": "The following service(s) just went **OFFLINE** and require attention:",
             "color": 15548997,
             "fields": fields,
-            "footer": {"text": "System Watchdog • Alerting once per incident"},
+            "footer": {"text": "Outages • Alerting once per incident"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         ping_text = f"<@&{ALERT_ROLE_ID}>" if ALERT_ROLE_ID else ""
@@ -338,7 +338,7 @@ async def main():
             "description": "The following service(s) are back **ONLINE**:",
             "color": 5763719,
             "fields": fields,
-            "footer": {"text": "System Watchdog • Service Restored"},
+            "footer": {"text": "Outages • Service Restored"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         post_webhook("", [recovery_embed])
