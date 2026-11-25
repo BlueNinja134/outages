@@ -3,9 +3,10 @@ import json
 import time
 import socket
 import struct
-import urllib.request
 import asyncio
 from datetime import datetime, timezone
+import requests
+import dns.resolver
 import discord
 
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
@@ -53,15 +54,32 @@ def format_duration(seconds):
 
 def check_website(url):
     start = time.perf_counter()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "StatusMonitor/2.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            latency = round((time.perf_counter() - start) * 1000)
-            if response.status >= 400:
-                return False, f"HTTP Error {response.status}", f"Target: `{url}`"
-            return True, f"Online ({latency}ms • HTTP {response.status})", f"Target: `{url}`"
+        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        latency = round((time.perf_counter() - start) * 1000)
+
+        # 200-399 = Normal online
+        if resp.status_code < 400:
+            return True, f"Online ({latency}ms • HTTP {resp.status_code})", f"Target: `{url}`"
+
+        # 403/429 on Falix/Cloudflare means the site is UP, just showing a bot challenge
+        if resp.status_code in (401, 403, 429):
+            return True, f"Online ({latency}ms • Cloudflare Protected {resp.status_code})", f"Target: `{url}`"
+
+        # 500-599 (like Cloudflare 521/522/523/502) = Actual Falix server outage
+        return False, f"Server Error (HTTP {resp.status_code})", f"Target: `{url}`"
+
+    except requests.exceptions.Timeout:
+        return False, "Connection Timed Out (>15s)", f"Target: `{url}`"
+    except requests.exceptions.ConnectionError as e:
+        return False, f"Connection Failed ({type(e).__name__})", f"Target: `{url}`"
     except Exception as e:
-        return False, f"Unreachable ({type(e).__name__})", f"Target: `{url}`"
+        return False, f"Error ({type(e).__name__}: {e})", f"Target: `{url}`"
 
 
 def _pack_varint(val):
@@ -88,14 +106,26 @@ def _unpack_varint(sock):
     raise ValueError("VarInt too big")
 
 
+def resolve_mc_srv(address):
+    if ":" in address:
+        host, port_str = address.split(":", 1)
+        return host, int(port_str)
+    try:
+        answers = dns.resolver.resolve(f"_minecraft._tcp.{address}", "SRV")
+        for rdata in answers:
+            return str(rdata.target).rstrip("."), int(rdata.port)
+    except Exception:
+        pass
+    return address, 25565
+
+
 def check_minecraft(address):
-    host, port_str = (address.split(":") + ["25565"])[:2]
-    port = int(port_str)
+    clean_addr = address.replace("https://", "").replace("http://", "").strip("/")
+    host, port = resolve_mc_srv(clean_addr)
     start = time.perf_counter()
     try:
         with socket.create_connection((host, port), timeout=10) as sock:
             sock.settimeout(10)
-            # Send Minecraft Handshake + Status Request (Server List Ping)
             host_bytes = host.encode("utf-8")
             handshake_data = (
                 b"\x00"
@@ -108,7 +138,7 @@ def check_minecraft(address):
             sock.sendall(_pack_varint(len(handshake_data)) + handshake_data)
             sock.sendall(b"\x01\x00")
 
-            _ = _unpack_varint(sock)  # Packet length
+            _ = _unpack_varint(sock)
             packet_id = _unpack_varint(sock)
             if packet_id != 0:
                 raise ValueError("Invalid status packet")
@@ -126,9 +156,9 @@ def check_minecraft(address):
             players = data.get("players", {})
             online = players.get("online", "?")
             maximum = players.get("max", "?")
-            return True, f"Online ({latency}ms • {online}/{maximum} players)", f"Server: `{address}`"
-    except Exception:
-        return False, "Offline / Server Not Responding", f"Server: `{address}`"
+            return True, f"Online ({latency}ms • {online}/{maximum} players)", f"Server: `{clean_addr}`"
+    except Exception as e:
+        return False, f"Offline ({type(e).__name__})", f"Server: `{clean_addr}` (`{host}:{port}`)"
 
 
 async def check_discord_bots():
@@ -183,7 +213,7 @@ async def check_discord_bots():
 
 def post_webhook(content, embeds):
     payload = {
-        "username": "Outages",
+        "username": "System Watchdog",
         "embeds": embeds,
     }
     if content:
@@ -191,13 +221,7 @@ def post_webhook(content, embeds):
         if ALERT_ROLE_ID:
             payload["allowed_mentions"] = {"roles": [ALERT_ROLE_ID]}
 
-    req = urllib.request.Request(
-        WEBHOOK_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "StatusMonitor/2.0"},
-        method="POST",
-    )
-    urllib.request.urlopen(req, timeout=10)
+    requests.post(WEBHOOK_URL, json=payload, timeout=10)
 
 
 async def main():
@@ -205,18 +229,21 @@ async def main():
     prev_state = load_state()
     new_state = {}
 
-    # Format: key -> (Display Name, is_online, status_text, extra_info)
     checks = {}
 
     if WEBSITE_URL:
         ok, status_text, extra = check_website(WEBSITE_URL)
+        print(f"Website check: {ok} -> {status_text}")
         checks["website"] = ("🌐 Website", ok, status_text, extra)
 
     if MC_SERVER_IP:
         ok, status_text, extra = check_minecraft(MC_SERVER_IP)
+        print(f"Minecraft check: {ok} -> {status_text}")
         checks["minecraft"] = ("⛏️ Minecraft Server", ok, status_text, extra)
 
     bot_results = await check_discord_bots()
+    for k, v in bot_results.items():
+        print(f"Bot check ({k}): {v[1]} -> {v[2]}")
     checks.update(bot_results)
 
     new_outages = []
@@ -227,20 +254,16 @@ async def main():
 
         if not is_online:
             if was_down_since is None:
-                # Just went offline!
                 new_state[key] = now
                 new_outages.append((name, status_text, extra, now))
             else:
-                # Still offline (keep original timestamp, don't spam)
                 new_state[key] = was_down_since
         else:
             new_state[key] = None
             if was_down_since is not None:
-                # Just came back online!
                 downtime = format_duration(now - was_down_since)
                 recoveries.append((name, status_text, extra, downtime))
 
-    # 1. Send Red Alert + Role Ping ONLY for newly detected outages
     if new_outages:
         fields = []
         for name, status_text, extra, down_ts in new_outages:
@@ -255,13 +278,12 @@ async def main():
             "description": "The following service(s) just went **OFFLINE** and require attention:",
             "color": 15548997,
             "fields": fields,
-            "footer": {"text": "Outages • Alerting once per incident"},
+            "footer": {"text": "System Watchdog • Alerting once per incident"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         ping_text = f"<@&{ALERT_ROLE_ID}>" if ALERT_ROLE_ID else ""
         post_webhook(ping_text, [outage_embed])
 
-    # 2. Send Green Recovery Embed (no role ping spam) when services come back
     if recoveries:
         fields = []
         for name, status_text, extra, downtime in recoveries:
@@ -272,20 +294,3 @@ async def main():
             })
 
         recovery_embed = {
-            "title": "✅ Service Recovered",
-            "description": "The following service(s) are back **ONLINE**:",
-            "color": 5763719,
-            "fields": fields,
-            "footer": {"text": "Outages • Incident Resolved"},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        post_webhook("", [recovery_embed])
-
-    if not new_outages and not recoveries:
-        print("No status changes detected.")
-
-    save_state(new_state)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
