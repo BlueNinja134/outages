@@ -2,7 +2,7 @@ name: Outage Monitor
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Runs every 5 minutes (GitHub's fastest interval)
+    - cron: '*/5 * * * *' # Runs every 5 minutes
   workflow_dispatch:
 
 permissions:
@@ -31,16 +31,21 @@ jobs:
           BOT_IDS: ${{ secrets.BOT_IDS }}
           WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
+          ALERT_ROLE_ID: ${{ secrets.ALERT_ROLE_ID }}
         run: python monitor.py
 
-      - name: Keep workflow alive (Monthly)
+      - name: Save status state & keep repo alive
         if: always()
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@://github.com"
+
           if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "00" ]; then
             date -u > .keepalive
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@://github.com"
-            git add .keepalive
-            git commit -m "Keep scheduled workflow active" || exit 0
+          fi
+
+          git add status.json .keepalive 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update service status state"
             git push
           fi
