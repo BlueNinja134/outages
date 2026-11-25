@@ -63,15 +63,12 @@ def check_website(url):
         resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         latency = round((time.perf_counter() - start) * 1000)
 
-        # 200-399 = Normal online
         if resp.status_code < 400:
             return True, f"Online ({latency}ms • HTTP {resp.status_code})", f"Target: `{url}`"
 
-        # 403/429 on Falix/Cloudflare means the site is UP, just showing a bot challenge
         if resp.status_code in (401, 403, 429):
             return True, f"Online ({latency}ms • Cloudflare Protected {resp.status_code})", f"Target: `{url}`"
 
-        # 500-599 (like Cloudflare 521/522/523/502) = Actual Falix server outage
         return False, f"Server Error (HTTP {resp.status_code})", f"Target: `{url}`"
 
     except requests.exceptions.Timeout:
@@ -228,7 +225,6 @@ async def main():
     now = int(time.time())
     prev_state = load_state()
     new_state = {}
-
     checks = {}
 
     if WEBSITE_URL:
@@ -294,3 +290,7 @@ async def main():
             })
 
         recovery_embed = {
+            "title": "✅ Service Recovered",
+            "description": "The following service(s) are back **ONLINE**:",
+            "color": 5763719,
+            "fields": fields,
