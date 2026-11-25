@@ -4,15 +4,16 @@ import time
 import socket
 import struct
 import asyncio
+import tempfile
 from datetime import datetime, timezone
 import requests
 import dns.resolver
 import discord
 
-WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
-BOT_TOKEN = os.environ["MONITOR_BOT_TOKEN"]
-GUILD_ID = int(os.environ["GUILD_ID"])
-TARGET_BOT_IDS = [int(x.strip()) for x in os.environ["BOT_IDS"].split(",") if x.strip()]
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+BOT_TOKEN = os.environ.get("MONITOR_BOT_TOKEN", "")
+GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+TARGET_BOT_IDS = [int(x.strip()) for x in os.environ.get("BOT_IDS", "").split(",") if x.strip()]
 WEBSITE_URL = os.environ.get("WEBSITE_URL", "").strip()
 MC_SERVER_IP = os.environ.get("MC_SERVER_IP", "").strip()
 ALERT_ROLE_ID = os.environ.get("ALERT_ROLE_ID", "").strip()
@@ -25,14 +26,22 @@ def load_state():
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            print(f"[Warning] Failed to load state file: {e}")
             return {}
     return {}
 
 
 def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    try:
+        # Atomic write to prevent file corruption
+        dir_name = os.path.dirname(STATE_FILE) or "."
+        with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tf:
+            json.dump(state, tf, indent=2)
+            temp_name = tf.name
+        os.replace(temp_name, STATE_FILE)
+    except Exception as e:
+        print(f"[Error] Failed to save state file: {e}")
 
 
 def format_duration(seconds):
@@ -53,6 +62,8 @@ def format_duration(seconds):
 
 
 def check_website(url):
+    if not url:
+        return False, "No URL specified", ""
     start = time.perf_counter()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -117,6 +128,8 @@ def resolve_mc_srv(address):
 
 
 def check_minecraft(address):
+    if not address:
+        return False, "No address specified", ""
     clean_addr = address.replace("https://", "").replace("http://", "").strip("/")
     host, port = resolve_mc_srv(clean_addr)
     start = time.perf_counter()
@@ -159,9 +172,13 @@ def check_minecraft(address):
 
 
 async def check_discord_bots():
+    if not BOT_TOKEN or not TARGET_BOT_IDS or not GUILD_ID:
+        return {}
+
     intents = discord.Intents.default()
     intents.presences = True
     intents.members = True
+    
     client = discord.Client(intents=intents)
     results = {}
 
@@ -201,14 +218,38 @@ async def check_discord_bots():
                             f"Online ({str(member.status).upper()})",
                             f"Mention: <@{bot_id}>",
                         )
+        except Exception as e:
+            print(f"[Error] Exception during bot check execution: {e}")
         finally:
             await client.close()
 
-    await client.start(BOT_TOKEN)
+    try:
+        await asyncio.wait_for(client.start(BOT_TOKEN), timeout=25.0)
+    except asyncio.TimeoutError:
+        print("[Error] Discord bot check timed out.")
+        try:
+            await client.close()
+        except:
+            pass
+        for bot_id in TARGET_BOT_IDS:
+            if f"bot_{bot_id}" not in results:
+                results[f"bot_{bot_id}"] = (
+                    f"🤖 Discord Bot ({bot_id})",
+                    False,
+                    "Client connection timed out",
+                    f"Mention: <@{bot_id}>",
+                )
+    except Exception as e:
+        print(f"[Error] Failed to start Discord client: {e}")
+
     return results
 
 
 def post_webhook(content, embeds):
+    if not WEBHOOK_URL:
+        print("[Warning] WEBHOOK_URL is not set. Skipping notification.")
+        return
+    
     payload = {
         "username": "System Watchdog",
         "embeds": embeds,
@@ -218,7 +259,10 @@ def post_webhook(content, embeds):
         if ALERT_ROLE_ID:
             payload["allowed_mentions"] = {"roles": [ALERT_ROLE_ID]}
 
-    requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    try:
+        requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[Error] Failed to send webhook alert: {e}")
 
 
 async def main():
@@ -294,3 +338,13 @@ async def main():
             "description": "The following service(s) are back **ONLINE**:",
             "color": 5763719,
             "fields": fields,
+            "footer": {"text": "System Watchdog • Service Restored"},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        post_webhook("", [recovery_embed])
+
+    save_state(new_state)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
