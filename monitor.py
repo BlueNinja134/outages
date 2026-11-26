@@ -203,22 +203,27 @@ async def check_discord_bots():
             else:
                 for bot_id in TARGET_BOT_IDS:
                     try:
-                        # Use fetch_member to avoid cache misses on startup
                         member = await guild.fetch_member(bot_id)
-                        if member.status == discord.Status.offline:
-                            results[f"bot_{bot_id}"] = (
-                                f"🤖 {member.display_name}",
-                                False,
-                                "Status: OFFLINE",
-                                f"Mention: <@{bot_id}>",
-                            )
+                        
+                        # Check if member is a bot or user and evaluate their general online presence
+                        # If a bot is connected to gateway, member.status won't be discord.Status.offline
+                        is_online = member.status != discord.Status.offline and member.status != discord.Status.invisible
+                        
+                        # Alternative fallback: if member.raw_status exists or bot is active in voice/presence
+                        if str(member.status) in ["online", "idle", "dnd"]:
+                            is_online = True
                         else:
-                            results[f"bot_{bot_id}"] = (
-                                f"🤖 {member.display_name}",
-                                True,
-                                f"Online ({str(member.status).upper()})",
-                                f"Mention: <@{bot_id}>",
-                            )
+                            # If status comes back as offline/mobile/desktop checks
+                            is_online = member.status != discord.Status.offline
+
+                        status_label = f"Online ({str(member.status).upper()})" if is_online else "Status: OFFLINE"
+                        
+                        results[f"bot_{bot_id}"] = (
+                            f"🤖 {member.display_name}",
+                            is_online,
+                            status_label,
+                            f"Mention: <@{bot_id}>",
+                        )
                     except discord.NotFound:
                         results[f"bot_{bot_id}"] = (
                             f"🤖 Bot ({bot_id})",
