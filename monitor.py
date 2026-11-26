@@ -20,7 +20,6 @@ WEBSITE_URLS = [x.strip() for x in os.environ.get("WEBSITE_URLS", os.environ.get
 MC_SERVER_IPS = [x.strip() for x in os.environ.get("MC_SERVER_IPS", os.environ.get("MC_SERVER_IP", "")).split(",") if x.strip()]
 
 ALERT_ROLE_ID = os.environ.get("ALERT_ROLE_ID", "").strip()
-# Get dashboard password from environment variable (default fallback for local testing)
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin123")
 
 STATE_FILE = "status.json"
@@ -359,7 +358,6 @@ def generate_dashboard(checks, state):
     </div>
     """
 
-    # Securely hash the password secret in Python so the raw password never goes into git
     pwd_hash = hashlib.sha256(DASHBOARD_PASSWORD.encode("utf-8")).hexdigest()
 
     html_content = f"""<!DOCTYPE html>
