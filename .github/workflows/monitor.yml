@@ -51,9 +51,9 @@ jobs:
             date -u > .keepalive
           fi
 
-          git add status.json index.html .keepalive 2>/dev/null || true
+          git add status.json .keepalive 2>/dev/null || true
           if ! git diff --cached --quiet; then
-            git commit -m "Update service status dashboard & state"
+            git commit -m "Update service status state"
             git push
           fi
 
@@ -63,7 +63,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: 'site'
 
       - name: Deploy to GitHub Pages
         id: deployment
