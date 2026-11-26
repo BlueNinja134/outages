@@ -32,6 +32,7 @@ jobs:
           WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
           ALERT_ROLE_ID: ${{ secrets.ALERT_ROLE_ID }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: python monitor.py
 
       - name: Save status state & keep repo alive
@@ -44,8 +45,8 @@ jobs:
             date -u > .keepalive
           fi
 
-          git add status.json .keepalive 2>/dev/null || true
+          git add status.json index.html .keepalive 2>/dev/null || true
           if ! git diff --cached --quiet; then
-            git commit -m "Update service status state"
+            git commit -m "Update service status dashboard & state"
             git push
           fi
