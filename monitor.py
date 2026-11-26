@@ -1,59 +1,128 @@
-import os
-import json
-import time
-import socket
-import struct
+#!/usr/bin/env python3
+"""
+Outage monitor.
+
+Checks websites, Minecraft servers and Discord bots, alerts a Discord webhook
+when something goes down or recovers, and builds an encrypted status dashboard
+(site/index.html) that GitHub Pages serves.
+
+Usage:
+    python monitor.py              run all checks (what the workflow does)
+    python monitor.py --dry-run    run checks, print alerts instead of sending them
+    python monitor.py --demo       build a sample dashboard from fake data (password: demo)
+"""
+
+import argparse
 import asyncio
-import tempfile
+import base64
 import hashlib
+import json
+import math
+import os
+import random
+import secrets
+import socket
+import ssl
+import struct
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse
+
 import requests
-import dns.resolver
-import discord
 
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
-BOT_TOKEN = os.environ.get("MONITOR_BOT_TOKEN", "")
-GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
-TARGET_BOT_IDS = [int(x.strip()) for x in os.environ.get("BOT_IDS", "").split(",") if x.strip()]
 
-WEBSITE_URLS = [x.strip() for x in os.environ.get("WEBSITE_URLS", os.environ.get("WEBSITE_URL", "")).split(",") if x.strip()]
-MC_SERVER_IPS = [x.strip() for x in os.environ.get("MC_SERVER_IPS", os.environ.get("MC_SERVER_IP", "")).split(",") if x.strip()]
+# --------------------------------------------------------------------------- #
+# Configuration
+# --------------------------------------------------------------------------- #
 
-ALERT_ROLE_ID = os.environ.get("ALERT_ROLE_ID", "").strip()
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin123")
+def _env(name, default=""):
+    """Environment lookup that treats an empty string (unset secret/var) as missing."""
+    value = os.environ.get(name, "").strip()
+    return value if value else default
 
-STATE_FILE = "status.json"
-DASHBOARD_FILE = "index.html"
+
+def _env_int(name, default):
+    try:
+        return int(_env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_list(*names):
+    for name in names:
+        value = _env(name)
+        if value:
+            return [x.strip() for x in value.split(",") if x.strip()]
+    return []
+
+
+WEBHOOK_URL = _env("DISCORD_WEBHOOK_URL")
+BOT_TOKEN = _env("MONITOR_BOT_TOKEN")
+GUILD_ID = _env_int("GUILD_ID", 0)
+TARGET_BOT_IDS = [int(x) for x in _env_list("BOT_IDS") if x.isdigit()]
+WEBSITE_URLS = _env_list("WEBSITE_URLS", "WEBSITE_URL")
+MC_SERVER_IPS = _env_list("MC_SERVER_IPS", "MC_SERVER_IP")
+ALERT_ROLE_ID = _env("ALERT_ROLE_ID")
+
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
+DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "System Watchdog")
+DASHBOARD_URL = _env("DASHBOARD_URL")
+
+# A service is declared down after this many failed runs in a row (5 minutes apart).
+# 1 alerts on the first failed run; 2 filters out one-off blips.
+FAILURE_THRESHOLD = max(1, _env_int("FAILURE_THRESHOLD", 2))
+# Extra attempts inside a single run before a check counts as failed.
+RETRIES = max(0, _env_int("CHECK_RETRIES", 2))
+RETRY_DELAY = 3
+CERT_WARN_DAYS = _env_int("CERT_WARN_DAYS", 14)
+
+STATE_FILE = Path(_env("STATE_FILE", "status.json"))
+SITE_DIR = Path(_env("SITE_DIR", "site"))
+TEMPLATE_FILE = Path(__file__).with_name("dashboard.html")
+
+STATE_VERSION = 2
+CHECK_INTERVAL = 300          # seconds between scheduled runs (shown on the dashboard)
+RECENT_MAX = 288              # 24 hours of 5 minute checks
+HISTORY_DAYS = 90
+INCIDENTS_MAX = 50
+PBKDF2_ITERATIONS = 600_000
+
+COLOR_DOWN = 0xED4245
+COLOR_UP = 0x57F287
+COLOR_WARN = 0xFEE75C
 
 
 def log(level, message):
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC] [{level}] {message}")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{stamp} UTC] [{level}] {message}", flush=True)
 
 
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            log("WARNING", f"Failed to load state file: {e}")
-            return {}
-    return {}
+# --------------------------------------------------------------------------- #
+# Check results
+# --------------------------------------------------------------------------- #
 
-
-def save_state(state):
-    try:
-        dir_name = os.path.dirname(STATE_FILE) or "."
-        with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tf:
-            json.dump(state, tf, indent=2)
-            temp_name = tf.name
-        os.replace(temp_name, STATE_FILE)
-    except Exception as e:
-        log("ERROR", f"Failed to save state file: {e}")
+@dataclass
+class Check:
+    key: str
+    name: str
+    kind: str                       # website | minecraft | bot
+    target: str                     # plain text shown on the dashboard
+    ok: Optional[bool]              # True = up, False = down, None = could not be checked
+    detail: str                     # short status line
+    latency_ms: Optional[int] = None
+    info: str = ""                  # extra line for the dashboard
+    mention: str = ""               # Discord mention, used only in alerts
+    cert_days: Optional[int] = None
 
 
 def format_duration(seconds):
-    seconds = int(seconds)
+    seconds = max(0, int(seconds))
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, secs = divmod(rem, 60)
@@ -66,37 +135,85 @@ def format_duration(seconds):
         parts.append(f"{minutes}m")
     if secs or not parts:
         parts.append(f"{secs}s")
-    return " ".join(parts)
+    return " ".join(parts[:3])
 
 
-def check_website(url):
-    if not url:
-        return False, "No URL specified", ""
+# --------------------------------------------------------------------------- #
+# Website check
+# --------------------------------------------------------------------------- #
+
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _http_once(url):
     start = time.perf_counter()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     try:
-        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        resp = requests.get(url, headers=BROWSER_HEADERS, timeout=15, allow_redirects=True, stream=True)
         latency = round((time.perf_counter() - start) * 1000)
-
-        if resp.status_code < 400:
-            return True, f"Online ({latency}ms • HTTP {resp.status_code})", f"Target: `{url}`"
-
-        if resp.status_code in (401, 403, 429):
-            return True, f"Online ({latency}ms • Cloudflare Protected {resp.status_code})", f"Target: `{url}`"
-
-        return False, f"Server Error (HTTP {resp.status_code})", f"Target: `{url}`"
-
+        code = resp.status_code
+        resp.close()
     except requests.exceptions.Timeout:
-        return False, "Connection Timed Out (>15s)", f"Target: `{url}`"
+        return False, "Timed out after 15 s", None
+    except requests.exceptions.SSLError:
+        return False, "TLS certificate error", None
     except requests.exceptions.ConnectionError as e:
-        return False, f"Connection Failed ({type(e).__name__})", f"Target: `{url}`"
+        return False, f"Connection failed ({type(e).__name__})", None
     except Exception as e:
-        return False, f"Error ({type(e).__name__}: {e})", f"Target: `{url}`"
+        return False, f"Error ({type(e).__name__})", None
 
+    if code < 400:
+        return True, f"HTTP {code}", latency
+    if code in (401, 403, 429):
+        # Reachable, but a bot filter (for example Cloudflare) refused the request.
+        return True, f"HTTP {code} (bot protection answered)", latency
+    return False, f"HTTP {code}", latency
+
+
+def _cert_days_left(url):
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((parsed.hostname, parsed.port or 443), timeout=8) as raw:
+            with ctx.wrap_socket(raw, server_hostname=parsed.hostname) as tls:
+                cert = tls.getpeercert()
+        expires = ssl.cert_time_to_seconds(cert["notAfter"])
+        return math.floor((expires - time.time()) / 86400)
+    except Exception:
+        return None
+
+
+def check_website(key, name, url):
+    ok, detail, latency = False, "No response", None
+    for attempt in range(RETRIES + 1):
+        ok, detail, latency = _http_once(url)
+        if ok:
+            break
+        if attempt < RETRIES:
+            time.sleep(RETRY_DELAY)
+
+    cert_days = _cert_days_left(url) if ok else None
+    info = ""
+    if cert_days is not None:
+        info = (
+            f"Certificate expires in {cert_days} days"
+            if cert_days >= 0
+            else "Certificate has expired"
+        )
+    return Check(key, name, "website", url, ok, detail, latency, info, cert_days=cert_days)
+
+
+# --------------------------------------------------------------------------- #
+# Minecraft check (Server List Ping)
+# --------------------------------------------------------------------------- #
 
 def _pack_varint(val):
     out = bytearray()
@@ -109,13 +226,20 @@ def _pack_varint(val):
     return bytes(out)
 
 
-def _unpack_varint(sock):
+def _recv_exact(sock, n):
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("Connection closed early")
+        buf += chunk
+    return bytes(buf)
+
+
+def _read_varint(sock):
     val = 0
     for i in range(5):
-        raw = sock.recv(1)
-        if not raw:
-            raise ConnectionError("Unexpected EOF")
-        byte = raw[0]
+        byte = _recv_exact(sock, 1)[0]
         val |= (byte & 0x7F) << (7 * i)
         if not (byte & 0x80):
             return val
@@ -124,28 +248,24 @@ def _unpack_varint(sock):
 
 def resolve_mc_srv(address):
     if ":" in address:
-        host, port_str = address.split(":", 1)
+        host, port_str = address.rsplit(":", 1)
         return host, int(port_str)
     try:
-        answers = dns.resolver.resolve(f"_minecraft._tcp.{address}", "SRV")
-        for rdata in answers:
+        import dns.resolver
+        for rdata in dns.resolver.resolve(f"_minecraft._tcp.{address}", "SRV"):
             return str(rdata.target).rstrip("."), int(rdata.port)
     except Exception:
         pass
     return address, 25565
 
 
-def check_minecraft(address):
-    if not address:
-        return False, "No address specified", ""
-    clean_addr = address.replace("https://", "").replace("http://", "").strip("/")
-    host, port = resolve_mc_srv(clean_addr)
+def _mc_ping_once(host, port):
     start = time.perf_counter()
     try:
         with socket.create_connection((host, port), timeout=10) as sock:
             sock.settimeout(10)
             host_bytes = host.encode("utf-8")
-            handshake_data = (
+            handshake = (
                 b"\x00"
                 + _pack_varint(765)
                 + _pack_varint(len(host_bytes))
@@ -153,466 +273,565 @@ def check_minecraft(address):
                 + struct.pack(">H", port)
                 + b"\x01"
             )
-            sock.sendall(_pack_varint(len(handshake_data)) + handshake_data)
+            sock.sendall(_pack_varint(len(handshake)) + handshake)
             sock.sendall(b"\x01\x00")
 
-            _ = _unpack_varint(sock)
-            packet_id = _unpack_varint(sock)
-            if packet_id != 0:
+            _read_varint(sock)                       # packet length
+            if _read_varint(sock) != 0:              # packet id
                 raise ValueError("Invalid status packet")
-
-            json_len = _unpack_varint(sock)
-            raw_json = b""
-            while len(raw_json) < json_len:
-                chunk = sock.recv(json_len - len(raw_json))
-                if not chunk:
-                    break
-                raw_json += chunk
-
+            json_len = _read_varint(sock)
+            if json_len > 1_000_000:
+                raise ValueError("Status response too large")
+            data = json.loads(_recv_exact(sock, json_len).decode("utf-8"))
             latency = round((time.perf_counter() - start) * 1000)
-            data = json.loads(raw_json.decode("utf-8"))
-            players = data.get("players", {})
-            online = players.get("online", "?")
-            maximum = players.get("max", "?")
-            return True, f"Online ({latency}ms • {online}/{maximum} players)", f"Server: `{clean_addr}`"
     except Exception as e:
-        return False, f"Offline ({type(e).__name__})", f"Server: `{clean_addr}` (`{host}:{port}`)"
+        return None, None, f"No response ({type(e).__name__})"
+    return data, latency, ""
 
+
+def check_minecraft(key, name, address):
+    clean = address.replace("https://", "").replace("http://", "").strip("/")
+    host, port = resolve_mc_srv(clean)
+
+    data, latency, error = None, None, ""
+    for attempt in range(RETRIES + 1):
+        data, latency, error = _mc_ping_once(host, port)
+        if data is not None:
+            break
+        if attempt < RETRIES:
+            time.sleep(RETRY_DELAY)
+
+    target = clean if f"{host}:{port}" == clean else f"{clean} ({host}:{port})"
+    if data is None:
+        return Check(key, name, "minecraft", target, False, error)
+
+    players = data.get("players", {})
+    online, maximum = players.get("online", "?"), players.get("max", "?")
+    version = (data.get("version") or {}).get("name", "")
+    return Check(
+        key, name, "minecraft", target, True,
+        f"{online} of {maximum} players online", latency,
+        f"Version {version}" if version else "",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Discord bot presence check
+# --------------------------------------------------------------------------- #
 
 async def check_discord_bots():
-    if not BOT_TOKEN or not TARGET_BOT_IDS or not GUILD_ID:
-        return {}
+    """Checks bot presence. If the monitor itself cannot connect, bots are reported as
+    unknown (ok=None) instead of down, so a monitor problem never raises a false outage."""
+    if not (BOT_TOKEN and TARGET_BOT_IDS and GUILD_ID):
+        return []
 
-    intents = discord.Intents.default()
-    intents.presences = True
+    try:
+        import discord
+    except ImportError:
+        log("ERROR", "discord.py is not installed, skipping bot checks.")
+        return []
+
+    def unknown(reason):
+        return [
+            Check(f"bot_{bot_id}", f"Bot {bot_id}", "bot", f"ID {bot_id}", None, reason,
+                  mention=f"<@{bot_id}>")
+            for bot_id in TARGET_BOT_IDS
+        ]
+
+    intents = discord.Intents.none()
+    intents.guilds = True
     intents.members = True
-    
+    intents.presences = True
     client = discord.Client(intents=intents)
-    results = {}
+    results = []
 
     @client.event
     async def on_ready():
         try:
             guild = client.get_guild(GUILD_ID)
-            if not guild:
-                log("WARNING", f"Monitor bot cannot access guild ID {GUILD_ID}")
-                for bot_id in TARGET_BOT_IDS:
-                    results[f"bot_{bot_id}"] = (
-                        f"🤖 Discord Bot ({bot_id})",
-                        False,
-                        "Monitor bot cannot access guild",
-                        f"Mention: <@{bot_id}>",
-                    )
-            else:
-                try:
-                    await guild.chunk()
-                except Exception:
-                    pass
-                await asyncio.sleep(3.0)
+            if guild is None:
+                log("WARNING", f"Monitor bot cannot access guild {GUILD_ID}")
+                results.extend(unknown("Monitor bot cannot see the server"))
+                return
+            try:
+                await guild.chunk()
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)    # give presence updates a moment to arrive
 
-                for bot_id in TARGET_BOT_IDS:
-                    member = guild.get_member(bot_id)
-                    if not member:
-                        try:
-                            member = await guild.fetch_member(bot_id)
-                        except Exception:
-                            pass
+            for bot_id in TARGET_BOT_IDS:
+                member = guild.get_member(bot_id)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(bot_id)
+                    except Exception:
+                        member = None
+                if member is None:
+                    results.append(Check(
+                        f"bot_{bot_id}", f"Bot {bot_id}", "bot", f"ID {bot_id}", False,
+                        "Not a member of the server", mention=f"<@{bot_id}>"))
+                    continue
 
-                    if not member:
-                        results[f"bot_{bot_id}"] = (
-                            f"🤖 Bot ({bot_id})",
-                            False,
-                            "Missing from Discord server",
-                            f"Mention: <@{bot_id}>",
-                        )
-                        continue
-
-                    status_str = str(getattr(member, "status", "offline")).lower()
-                    is_online = status_str in ["online", "idle", "dnd"] or bool(member.activities)
-
-                    if is_online:
-                        status_label = f"Online ({status_str.upper()})"
-                        if member.activities:
-                            activity_names = [act.name for act in member.activities]
-                            status_label = f"Online ({', '.join(activity_names)})"
-                    else:
-                        status_label = "Status: OFFLINE"
-
-                    results[f"bot_{bot_id}"] = (
-                        f"🤖 {member.display_name}",
-                        is_online,
-                        status_label,
-                        f"Mention: <@{bot_id}>",
-                    )
+                status = str(getattr(member, "status", "offline")).lower()
+                online = status in ("online", "idle", "dnd") or bool(member.activities)
+                results.append(Check(
+                    f"bot_{bot_id}", member.display_name, "bot", f"ID {bot_id}", online,
+                    f"Online ({status})" if online else "Offline",
+                    mention=f"<@{bot_id}>"))
         except Exception as e:
-            log("ERROR", f"Exception during bot check execution: {e}")
+            log("ERROR", f"Bot check failed: {e}")
         finally:
             await client.close()
 
     try:
-        await asyncio.wait_for(client.start(BOT_TOKEN), timeout=35.0)
+        await asyncio.wait_for(client.start(BOT_TOKEN), timeout=40.0)
     except asyncio.TimeoutError:
         log("ERROR", "Discord bot check timed out.")
         try:
             await client.close()
-        except:
+        except Exception:
             pass
-        for bot_id in TARGET_BOT_IDS:
-            if f"bot_{bot_id}" not in results:
-                results[f"bot_{bot_id}"] = (
-                    f"🤖 Discord Bot ({bot_id})",
-                    False,
-                    "Client connection timed out",
-                    f"Mention: <@{bot_id}>",
-                )
     except Exception as e:
-        log("ERROR", f"Failed to start Discord client: {e}")
+        log("ERROR", f"Could not start Discord client: {type(e).__name__}: {e}")
 
-    return results
+    return results or unknown("Monitor could not reach Discord")
 
 
-def post_webhook(content, embeds):
-    if not WEBHOOK_URL:
-        log("WARNING", "WEBHOOK_URL is not set. Skipping notification.")
-        return
-    
-    for embed in embeds:
-        fields = embed.get("fields", [])
-        if len(fields) > 25:
-            chunked_fields = [fields[i:i + 25] for i in range(0, len(fields), 25)]
-            for idx, chunk in enumerate(chunked_fields):
-                chunk_embed = embed.copy()
-                chunk_embed["fields"] = chunk
-                if idx > 0:
-                    chunk_embed.pop("title", None)
-                
-                payload = {"username": "Outages", "embeds": [chunk_embed]}
-                if content and idx == 0:
-                    payload["content"] = content
-                    if ALERT_ROLE_ID:
-                        payload["allowed_mentions"] = {"roles": [ALERT_ROLE_ID]}
-                
-                try:
-                    requests.post(WEBHOOK_URL, json=payload, timeout=10)
-                except Exception as e:
-                    log("ERROR", f"Failed to send webhook chunk: {e}")
-            return
+# --------------------------------------------------------------------------- #
+# State
+# --------------------------------------------------------------------------- #
 
-    payload = {
-        "username": "Outages",
-        "embeds": embeds,
+def new_service():
+    return {
+        "name": "", "kind": "", "target": "",
+        "down_since": None, "failures": 0, "alerted": False,
+        "recent": [], "daily": {}, "cert_warned": 0,
     }
-    if content:
-        payload["content"] = content
-        if ALERT_ROLE_ID:
-            payload["allowed_mentions"] = {"roles": [ALERT_ROLE_ID]}
 
+
+def empty_state():
+    return {"version": STATE_VERSION, "services": {}, "incidents": []}
+
+
+def load_state():
+    if not STATE_FILE.exists():
+        return empty_state()
     try:
-        requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        raw = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception as e:
-        log("ERROR", f"Failed to send webhook alert: {e}")
+        log("WARNING", f"Could not read {STATE_FILE}: {e}")
+        return empty_state()
+
+    if isinstance(raw, dict) and raw.get("version") == STATE_VERSION:
+        raw.setdefault("services", {})
+        raw.setdefault("incidents", [])
+        return raw
+
+    # Migrate the old flat format: {"website": null | down_since_timestamp, ...}
+    state = empty_state()
+    for key, value in (raw or {}).items():
+        svc = new_service()
+        if isinstance(value, (int, float)):
+            svc.update(down_since=int(value), failures=FAILURE_THRESHOLD, alerted=True)
+            state["incidents"].append(
+                {"key": key, "name": key, "start": int(value), "end": None, "reason": "Outage in progress"})
+        state["services"][key] = svc
+    log("INFO", "Migrated old state file to the new format.")
+    return state
 
 
-def generate_dashboard(checks, state):
-    items_html = ""
-    all_operational = True
-
-    for key, (name, is_online, status_text, extra) in checks.items():
-        if not is_online:
-            all_operational = False
-            badge = '<span class="badge offline">Offline</span>'
-            card_class = "card offline"
-        else:
-            badge = '<span class="badge online">Operational</span>'
-            card_class = "card online"
-
-        down_since = state.get(key)
-        downtime_info = ""
-        if down_since:
-            downtime_duration = format_duration(time.time() - down_since)
-            downtime_info = f'<div class="downtime">Down for: <strong>{downtime_duration}</strong></div>'
-
-        items_html += f"""
-        <div class="{card_class}">
-            <div class="card-header">
-                <h3>{name}</h3>
-                {badge}
-            </div>
-            <div class="card-body">
-                <p class="status-text">{status_text}</p>
-                <p class="extra-info">{extra}</p>
-                {downtime_info}
-            </div>
-        </div>
-        """
-
-    overall_banner = """
-    <div class="banner operational">
-        <h2>🟢 All Systems Operational</h2>
-        <p>Every monitored service is currently online and running smoothly.</p>
-    </div>
-    """ if all_operational else """
-    <div class="banner incident">
-        <h2>🚨 Active Incident Detected</h2>
-        <p>One or more services are currently experiencing outages.</p>
-    </div>
-    """
-
-    pwd_hash = hashlib.sha256(DASHBOARD_PASSWORD.encode("utf-8")).hexdigest()
-
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>System Status Dashboard</title>
-    <style>
-        :root {{
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --text-color: #c9d1d9;
-            --border-color: #30363d;
-            --online-color: #238636;
-            --offline-color: #da3633;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-        }}
-        .container {{
-            width: 100%;
-            max-width: 800px;
-        }}
-        #login-overlay {{
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(13, 17, 23, 0.95);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }}
-        .login-box {{
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            padding: 30px;
-            border-radius: 8px;
-            text-align: center;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-        }}
-        .login-box input {{
-            padding: 10px;
-            margin: 10px 0;
-            background: #0d1117;
-            border: 1px solid var(--border-color);
-            color: white;
-            border-radius: 4px;
-            width: 80%;
-        }}
-        .login-box button {{
-            padding: 10px 20px;
-            background: var(--online-color);
-            border: none;
-            color: white;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-        }}
-        header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 20px;
-            margin-bottom: 20px;
-        }}
-        .banner {{
-            padding: 15px 20px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            border: 1px solid var(--border-color);
-        }}
-        .banner.operational {{ background: rgba(35, 134, 54, 0.15); border-color: var(--online-color); }}
-        .banner.incident {{ background: rgba(218, 54, 51, 0.15); border-color: var(--offline-color); }}
-        .card {{
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            margin-bottom: 15px;
-            padding: 20px;
-        }}
-        .card-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        .badge {{
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: bold;
-            color: white;
-        }}
-        .badge.online {{ background-color: var(--online-color); }}
-        .badge.offline {{ background-color: var(--offline-color); }}
-        .card-body {{ margin-top: 10px; font-size: 14px; }}
-        .extra-info {{ color: #8b949e; font-family: monospace; }}
-        .downtime {{ color: var(--offline-color); margin-top: 5px; }}
-        footer {{ text-align: center; margin-top: 40px; color: #8b949e; font-size: 12px; }}
-    </style>
-</head>
-<body>
-    <div id="login-overlay">
-        <div class="login-box">
-            <h2>🔒 Admin Login</h2>
-            <p>Enter password to view status dashboard</p>
-            <input type="password" id="password-input" placeholder="Password"><br>
-            <button onclick="checkPassword()">Login</button>
-            <p id="error-msg" style="color: var(--offline-color); font-size: 12px; display: none; margin-top: 10px;">Incorrect password</p>
-        </div>
-    </div>
-
-    <div class="container">
-        <header>
-            <h1>🛡️ System Watchdog</h1>
-            <span>Last Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</span>
-        </header>
-
-        {overall_banner}
-
-        <div class="services-list">
-            {items_html}
-        </div>
-
-        <footer>
-            Powered by System Watchdog & GitHub Pages
-        </footer>
-    </div>
-
-    <script>
-        const CORRECT_HASH = "{pwd_hash}";
-        
-        async function sha256(message) {{
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }}
-
-        async function checkPassword() {{
-            const pwd = document.getElementById('password-input').value;
-            const hash = await sha256(pwd);
-            if (hash === CORRECT_HASH) {{
-                document.getElementById('login-overlay').style.display = 'none';
-                localStorage.setItem('auth_success', 'true');
-            }} else {{
-                document.getElementById('error-msg').style.display = 'block';
-            }}
-        }}
-
-        if (localStorage.getItem('auth_success') === 'true') {{
-            document.getElementById('login-overlay').style.display = 'none';
-        }}
-    </script>
-</body>
-</html>
-"""
+def save_state(state):
     try:
-        with open(DASHBOARD_FILE, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        log("INFO", "Successfully generated index.html status dashboard.")
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=STATE_FILE.parent, delete=False, encoding="utf-8", suffix=".tmp"
+        ) as tf:
+            json.dump(state, tf, separators=(",", ":"))
+            temp_name = tf.name
+        os.replace(temp_name, STATE_FILE)
     except Exception as e:
-        log("ERROR", f"Failed to generate dashboard HTML: {e}")
+        log("ERROR", f"Failed to save state: {e}")
 
 
-async def main():
-    now = int(time.time())
-    prev_state = load_state()
-    new_state = {}
-    checks = {}
+def utc_day(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
 
-    for idx, url in enumerate(WEBSITE_URLS):
-        key = f"website_{idx}" if len(WEBSITE_URLS) > 1 else "website"
-        ok, status_text, extra = check_website(url)
-        log("INFO", f"Website check ({url}): {ok} -> {status_text}")
-        checks[key] = ("🌐 Website", ok, status_text, extra)
 
-    for idx, ip in enumerate(MC_SERVER_IPS):
-        key = f"minecraft_{idx}" if len(MC_SERVER_IPS) > 1 else "minecraft"
-        ok, status_text, extra = check_minecraft(ip)
-        log("INFO", f"Minecraft check ({ip}): {ok} -> {status_text}")
-        checks[key] = ("⛏️ Minecraft Server", ok, status_text, extra)
+def record(svc, now, ok, latency):
+    svc["recent"].append([now, 1 if ok else 0, latency])
+    del svc["recent"][:-RECENT_MAX]
+    day = svc["daily"].setdefault(utc_day(now), [0, 0])
+    day[0] += 1 if ok else 0
+    day[1] += 1
+    cutoff = utc_day(now - HISTORY_DAYS * 86400)
+    for stale in [d for d in svc["daily"] if d < cutoff]:
+        del svc["daily"][stale]
 
-    bot_results = await check_discord_bots()
-    for k, v in bot_results.items():
-        log("INFO", f"Bot check ({k}): {v[1]} -> {v[2]}")
-    checks.update(bot_results)
 
-    new_outages = []
-    recoveries = []
+def apply_results(state, checks, now):
+    """Updates state from this run and returns the alerts to send."""
+    outages, recoveries, cert_warnings = [], [], []
+    services = state["services"]
 
-    for key, (name, is_online, status_text, extra) in checks.items():
-        was_down_since = prev_state.get(key)
+    for stale_key in [k for k in services if k not in {c.key for c in checks}]:
+        del services[stale_key]
 
-        if not is_online:
-            if was_down_since is None:
-                new_state[key] = now
-                new_outages.append((name, status_text, extra, now))
-            else:
-                new_state[key] = was_down_since
+    for check in checks:
+        svc = services.setdefault(check.key, new_service())
+        svc.update(name=check.name, kind=check.kind, target=check.target)
+        svc["last"] = {"ok": check.ok, "detail": check.detail, "latency": check.latency_ms, "info": check.info}
+
+        if check.ok is None:
+            continue                                    # monitor problem, leave history alone
+
+        record(svc, now, check.ok, check.latency_ms)
+
+        if check.ok:
+            if svc["alerted"]:
+                for inc in reversed(state["incidents"]):
+                    if inc["key"] == check.key and inc["end"] is None:
+                        inc["end"] = now
+                        break
+                recoveries.append((check, now - (svc["down_since"] or now), uptime_pct(svc, now, 1)))
+            svc.update(down_since=None, failures=0, alerted=False)
+
+            if check.cert_days is not None and check.cert_days <= CERT_WARN_DAYS \
+                    and now - svc.get("cert_warned", 0) > 3 * 86400:
+                svc["cert_warned"] = now
+                cert_warnings.append(check)
         else:
-            new_state[key] = None
-            if was_down_since is not None:
-                downtime = format_duration(now - was_down_since)
-                recoveries.append((name, status_text, extra, downtime))
+            svc["failures"] += 1
+            if svc["down_since"] is None:
+                svc["down_since"] = now
+            if svc["failures"] >= FAILURE_THRESHOLD and not svc["alerted"]:
+                svc["alerted"] = True
+                state["incidents"].append(
+                    {"key": check.key, "name": check.name, "start": svc["down_since"],
+                     "end": None, "reason": check.detail})
+                outages.append((check, svc["down_since"]))
 
-    if new_outages:
-        fields = []
-        for name, status_text, extra, down_ts in new_outages:
-            fields.append({
-                "name": name,
-                "value": f"{extra} • Detected <t:{down_ts}:R>\n```diff\n- {status_text}\n```",
-                "inline": False,
-            })
+    del state["incidents"][:-INCIDENTS_MAX]
+    return outages, recoveries, cert_warnings
 
-        outage_embed = {
-            "title": "🚨 Service Outage Detected",
-            "description": "The following service(s) just went **OFFLINE** and require attention:",
-            "color": 15548997,
-            "fields": fields,
-            "footer": {"text": "Outages • Alerting once per incident"},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        ping_text = f"<@&{ALERT_ROLE_ID}>" if ALERT_ROLE_ID else ""
-        post_webhook(ping_text, [outage_embed])
+
+def uptime_pct(svc, now, days):
+    if days <= 1:
+        window = [p for p in svc["recent"] if p[0] >= now - 86400]
+        up, total = sum(p[1] for p in window), len(window)
+    else:
+        up = total = 0
+        for i in range(days):
+            day = svc["daily"].get(utc_day(now - i * 86400))
+            if day:
+                up += day[0]
+                total += day[1]
+    if not total:
+        return None
+    pct = up * 100 / total
+    if up < total:
+        pct = min(pct, 99.99)           # never round a bad day up to a clean 100
+    return round(pct, 2)
+
+
+def service_status(svc):
+    last = svc.get("last") or {}
+    if last.get("ok") is None:
+        return "unknown"
+    if last["ok"]:
+        return "up"
+    return "down" if svc["alerted"] else "degraded"
+
+
+# --------------------------------------------------------------------------- #
+# Discord alerts
+# --------------------------------------------------------------------------- #
+
+def _trim(text, limit):
+    return text if len(text) <= limit else text[: limit - 1] + "..."
+
+
+def _discord_target(check):
+    return f"Bot: {check.mention}" if check.kind == "bot" else f"`{check.target}`"
+
+
+def post_webhook(embeds, ping=False, dry_run=False):
+    if not embeds:
+        return
+    payload = {"username": "Outages", "embeds": embeds[:10]}
+    if ping and ALERT_ROLE_ID:
+        payload["content"] = f"<@&{ALERT_ROLE_ID}>"
+        payload["allowed_mentions"] = {"roles": [ALERT_ROLE_ID]}
+    else:
+        payload["allowed_mentions"] = {"parse": []}
+
+    if dry_run or not WEBHOOK_URL:
+        log("INFO" if dry_run else "WARNING",
+            "Dry run, alert not sent:" if dry_run else "DISCORD_WEBHOOK_URL is not set, alert not sent:")
+        print(json.dumps(payload, indent=2))
+        return
+
+    for _ in range(3):
+        try:
+            resp = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        except Exception as e:
+            log("ERROR", f"Webhook request failed: {e}")
+            return
+        if resp.status_code == 429:
+            try:
+                wait = float(resp.json().get("retry_after", 1))
+            except Exception:
+                wait = 1.0
+            time.sleep(min(wait, 10))
+            continue
+        if resp.status_code >= 400:
+            log("ERROR", f"Webhook returned HTTP {resp.status_code}: {resp.text[:200]}")
+        return
+
+
+def _embed(title, description, color, fields, footer):
+    embed = {
+        "title": title,
+        "description": description,
+        "color": color,
+        "fields": fields[:25],
+        "footer": {"text": footer},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if DASHBOARD_URL:
+        embed["url"] = DASHBOARD_URL
+    return embed
+
+
+def send_alerts(outages, recoveries, cert_warnings, dry_run):
+    if outages:
+        fields = [{
+            "name": _trim(check.name, 256),
+            "value": _trim(
+                f"{_discord_target(check)}\nDown since <t:{since}:R>\n```diff\n- {check.detail}\n```", 1024),
+            "inline": False,
+        } for check, since in outages]
+        post_webhook([_embed(
+            "Service outage detected",
+            "These services are down and need attention:",
+            COLOR_DOWN, fields, "Alerts once per incident")], ping=True, dry_run=dry_run)
 
     if recoveries:
         fields = []
-        for name, status_text, extra, downtime in recoveries:
+        for check, downtime, uptime in recoveries:
+            uptime_text = f"\n24 hour uptime: {uptime}%" if uptime is not None else ""
             fields.append({
-                "name": name,
-                "value": f"{extra} • Total Downtime: **{downtime}**\n```diff\n+ {status_text}\n```",
+                "name": _trim(check.name, 256),
+                "value": _trim(
+                    f"{_discord_target(check)}\nTotal downtime: **{format_duration(downtime)}**"
+                    f"{uptime_text}\n```diff\n+ {check.detail}\n```", 1024),
                 "inline": False,
             })
+        post_webhook([_embed(
+            "Service recovered", "These services are back online:",
+            COLOR_UP, fields, "Service restored")], dry_run=dry_run)
 
-        recovery_embed = {
-            "title": "✅ Service Recovered",
-            "description": "The following service(s) are back **ONLINE**:",
-            "color": 5763719,
-            "fields": fields,
-            "footer": {"text": "Outages • Service Restored"},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+    if cert_warnings:
+        fields = [{
+            "name": _trim(check.name, 256),
+            "value": f"`{check.target}`\nThe TLS certificate expires in **{check.cert_days}** days.",
+            "inline": False,
+        } for check in cert_warnings]
+        post_webhook([_embed(
+            "Certificate expiring soon", "Renew these certificates before they lapse:",
+            COLOR_WARN, fields, "Certificate check")], dry_run=dry_run)
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+
+def build_payload(state, now):
+    services = []
+    days = [utc_day(now - i * 86400) for i in range(HISTORY_DAYS - 1, -1, -1)]
+    for key, svc in state["services"].items():
+        last = svc.get("last") or {}
+        services.append({
+            "key": key,
+            "name": svc["name"],
+            "kind": svc["kind"],
+            "target": svc["target"],
+            "status": service_status(svc),
+            "detail": last.get("detail", ""),
+            "info": last.get("info", ""),
+            "latency": last.get("latency"),
+            "down_since": svc["down_since"],
+            "uptime": {
+                "24h": uptime_pct(svc, now, 1),
+                "7d": uptime_pct(svc, now, 7),
+                "30d": uptime_pct(svc, now, 30),
+                "90d": uptime_pct(svc, now, HISTORY_DAYS),
+            },
+            "days": [svc["daily"].get(d) for d in days],
+            "recent": [p for p in svc["recent"] if p[0] >= now - 86400],
+        })
+
+    incidents = [
+        {"name": i["name"], "start": i["start"], "end": i["end"], "reason": i["reason"]}
+        for i in reversed(state["incidents"][-25:])
+    ]
+    return {
+        "title": DASHBOARD_TITLE,
+        "generated": now,
+        "interval": CHECK_INTERVAL,
+        "threshold": FAILURE_THRESHOLD,
+        "days_end": days[-1],
+        "services": services,
+        "incidents": incidents,
+    }
+
+
+def _b64(data):
+    return base64.b64encode(data).decode("ascii")
+
+
+def encrypt_payload(payload, password):
+    """AES-256-GCM with a PBKDF2-SHA256 key. The dashboard decrypts this in the browser
+    with Web Crypto, so nothing readable ships to people who lack the password."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    salt, iv = secrets.token_bytes(16), secrets.token_bytes(12)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS, dklen=32)
+    plaintext = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return {
+        "mode": "encrypted",
+        "iter": PBKDF2_ITERATIONS,
+        "salt": _b64(salt),
+        "iv": _b64(iv),
+        "ct": _b64(AESGCM(key).encrypt(iv, plaintext, None)),
+    }
+
+
+def write_dashboard(payload, password):
+    if not TEMPLATE_FILE.exists():
+        raise SystemExit(f"Dashboard template missing: {TEMPLATE_FILE}")
+
+    if password:
+        if len(password) < 12:
+            log("WARNING", "DASHBOARD_PASSWORD is short. The data is encrypted, but anyone can "
+                           "download the page and guess offline, so use a long passphrase.")
+        try:
+            blob = encrypt_payload(payload, password)
+        except ImportError:
+            # Never fall back to publishing readable data when a password was requested.
+            raise SystemExit("The 'cryptography' package is required to encrypt the dashboard.")
+    else:
+        log("WARNING", "DASHBOARD_PASSWORD is not set. The dashboard will be public.")
+        blob = {"mode": "plain", "payload": payload}
+
+    data = json.dumps(blob, separators=(",", ":")).replace("</", "<\\/")
+    html = TEMPLATE_FILE.read_text(encoding="utf-8").replace("__DASHBOARD_DATA__", data)
+
+    SITE_DIR.mkdir(parents=True, exist_ok=True)
+    (SITE_DIR / "index.html").write_text(html, encoding="utf-8")
+    (SITE_DIR / ".nojekyll").write_text("", encoding="utf-8")
+    log("INFO", f"Wrote {SITE_DIR / 'index.html'} ({'encrypted' if password else 'public'}).")
+
+
+# --------------------------------------------------------------------------- #
+# Demo data
+# --------------------------------------------------------------------------- #
+
+def build_demo_state(now):
+    rnd = random.Random(7)
+    state = empty_state()
+    specs = [
+        ("website", "Website", "website", "https://discycraft.eu", "up", 180),
+        ("minecraft", "Minecraft server", "minecraft", "play.discycraft.eu", "up", 42),
+        ("bot_1", "Moderation bot", "bot", "ID 100000000000000001", "up", None),
+        ("bot_2", "Giveaway bot", "bot", "ID 100000000000000002", "down", None),
+        ("bot_3", "Music bot", "bot", "ID 100000000000000003", "degraded", None),
+    ]
+    for key, name, kind, target, status, base in specs:
+        svc = new_service()
+        svc.update(name=name, kind=kind, target=target)
+        for i in range(HISTORY_DAYS):
+            ts = now - i * 86400
+            bad = rnd.random() < (0.12 if key != "website" else 0.04)
+            total = 288 if i else 150
+            up = total - (rnd.randint(2, 40) if bad else 0)
+            svc["daily"][utc_day(ts)] = [up, total]
+        for i in range(RECENT_MAX):
+            ts = now - (RECENT_MAX - 1 - i) * 300
+            fail = status != "up" and i > RECENT_MAX - 6
+            lat = None if base is None else max(8, int(base + rnd.gauss(0, base * 0.18)
+                                                        + (base * 1.4 if rnd.random() < 0.03 else 0)))
+            svc["recent"].append([ts, 0 if fail else 1, None if fail else lat])
+        ok = status == "up"
+        svc["last"] = {
+            "ok": ok,
+            "detail": {"website": "HTTP 200", "minecraft": "7 of 50 players online"}.get(key, "Online (online)")
+            if ok else "Offline",
+            "latency": svc["recent"][-1][2] if ok else None,
+            "info": {"website": "Certificate expires in 61 days", "minecraft": "Version Paper 1.21.11"}.get(key, ""),
         }
-        post_webhook("", [recovery_embed])
+        if status == "down":
+            svc.update(down_since=now - 5400, failures=18, alerted=True)
+            state["incidents"].append({"key": key, "name": name, "start": now - 5400, "end": None,
+                                       "reason": "Offline"})
+        elif status == "degraded":
+            svc.update(down_since=now - 320, failures=1)
+        state["services"][key] = svc
+    state["incidents"] += [
+        {"key": "minecraft", "name": "Minecraft server", "start": now - 3 * 86400 - 4000,
+         "end": now - 3 * 86400 - 2200, "reason": "No response (TimeoutError)"},
+        {"key": "website", "name": "Website", "start": now - 9 * 86400,
+         "end": now - 9 * 86400 + 640, "reason": "HTTP 503"},
+    ]
+    state["incidents"].sort(key=lambda i: i["start"])
+    return state
 
-    save_state(new_state)
-    generate_dashboard(checks, new_state)
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+
+async def collect_checks():
+    jobs = []
+    for idx, url in enumerate(WEBSITE_URLS):
+        key = f"website_{idx}" if len(WEBSITE_URLS) > 1 else "website"
+        name = (urlparse(url).hostname or url) if len(WEBSITE_URLS) > 1 else "Website"
+        jobs.append((check_website, key, name, url))
+    for idx, address in enumerate(MC_SERVER_IPS):
+        key = f"minecraft_{idx}" if len(MC_SERVER_IPS) > 1 else "minecraft"
+        name = address if len(MC_SERVER_IPS) > 1 else "Minecraft server"
+        jobs.append((check_minecraft, key, name, address))
+
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [loop.run_in_executor(pool, fn, key, name, target) for fn, key, name, target in jobs]
+        *simple, bots = await asyncio.gather(*futures, check_discord_bots())
+    return list(simple) + list(bots)
+
+
+async def main(args):
+    now = int(time.time())
+
+    if args.demo:
+        state = build_demo_state(now)
+        write_dashboard(build_payload(state, now), "demo")
+        log("INFO", "Demo dashboard built. Password: demo")
+        return
+
+    state = load_state()
+    checks = await collect_checks()
+    for c in checks:
+        verdict = {True: "up", False: "DOWN", None: "unknown"}[c.ok]
+        log("INFO", f"{c.name}: {verdict} ({c.detail})")
+
+    outages, recoveries, cert_warnings = apply_results(state, checks, now)
+    send_alerts(outages, recoveries, cert_warnings, args.dry_run)
+
+    save_state(state)
+    write_dashboard(build_payload(state, now), DASHBOARD_PASSWORD)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dry-run", action="store_true", help="print alerts instead of sending them")
+    parser.add_argument("--demo", action="store_true", help="build a sample dashboard from fake data")
+    asyncio.run(main(parser.parse_args()))
