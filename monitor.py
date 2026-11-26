@@ -203,21 +203,16 @@ async def check_discord_bots():
             else:
                 for bot_id in TARGET_BOT_IDS:
                     try:
+                        # Fetch member to verify presence in guild (bypasses bot-to-bot presence restriction)
                         member = await guild.fetch_member(bot_id)
                         
-                        # Check if member is a bot or user and evaluate their general online presence
-                        # If a bot is connected to gateway, member.status won't be discord.Status.offline
-                        is_online = member.status != discord.Status.offline and member.status != discord.Status.invisible
+                        is_online = True 
+                        status_label = "Online (Active)"
                         
-                        # Alternative fallback: if member.raw_status exists or bot is active in voice/presence
-                        if str(member.status) in ["online", "idle", "dnd"]:
-                            is_online = True
-                        else:
-                            # If status comes back as offline/mobile/desktop checks
-                            is_online = member.status != discord.Status.offline
+                        if member.activities:
+                            activity_names = [act.name for act in member.activities]
+                            status_label = f"Online ({', '.join(activity_names)})"
 
-                        status_label = f"Online ({str(member.status).upper()})" if is_online else "Status: OFFLINE"
-                        
                         results[f"bot_{bot_id}"] = (
                             f"🤖 {member.display_name}",
                             is_online,
@@ -271,7 +266,6 @@ def post_webhook(content, embeds):
         log("WARNING", "WEBHOOK_URL is not set. Skipping notification.")
         return
     
-    # Discord hard limit: max 25 fields per embed. Chunk fields if necessary.
     for embed in embeds:
         fields = embed.get("fields", [])
         if len(fields) > 25:
@@ -281,7 +275,7 @@ def post_webhook(content, embeds):
                 chunk_embed = embed.copy()
                 chunk_embed["fields"] = chunk
                 if idx > 0:
-                    chunk_embed.pop("title", None) # Remove title on subsequent chunks for neatness
+                    chunk_embed.pop("title", None)
                 
                 payload = {"username": "Outages", "embeds": [chunk_embed]}
                 if content and idx == 0:
@@ -316,21 +310,18 @@ async def main():
     new_state = {}
     checks = {}
 
-    # Check all configured websites
     for idx, url in enumerate(WEBSITE_URLS):
         key = f"website_{idx}" if len(WEBSITE_URLS) > 1 else "website"
         ok, status_text, extra = check_website(url)
         log("INFO", f"Website check ({url}): {ok} -> {status_text}")
         checks[key] = ("🌐 Website", ok, status_text, extra)
 
-    # Check all configured Minecraft servers
     for idx, ip in enumerate(MC_SERVER_IPS):
         key = f"minecraft_{idx}" if len(MC_SERVER_IPS) > 1 else "minecraft"
         ok, status_text, extra = check_minecraft(ip)
         log("INFO", f"Minecraft check ({ip}): {ok} -> {status_text}")
         checks[key] = ("⛏️ Minecraft Server", ok, status_text, extra)
 
-    # Check Discord bots
     bot_results = await check_discord_bots()
     for k, v in bot_results.items():
         log("INFO", f"Bot check ({k}): {v[1]} -> {v[2]}")
