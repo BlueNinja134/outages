@@ -5,6 +5,7 @@ import socket
 import struct
 import asyncio
 import tempfile
+import hashlib
 from datetime import datetime, timezone
 import requests
 import dns.resolver
@@ -19,6 +20,9 @@ WEBSITE_URLS = [x.strip() for x in os.environ.get("WEBSITE_URLS", os.environ.get
 MC_SERVER_IPS = [x.strip() for x in os.environ.get("MC_SERVER_IPS", os.environ.get("MC_SERVER_IP", "")).split(",") if x.strip()]
 
 ALERT_ROLE_ID = os.environ.get("ALERT_ROLE_ID", "").strip()
+# Get dashboard password from environment variable (default fallback for local testing)
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin123")
+
 STATE_FILE = "status.json"
 DASHBOARD_FILE = "index.html"
 
@@ -201,7 +205,6 @@ async def check_discord_bots():
                         f"Mention: <@{bot_id}>",
                     )
             else:
-                # Chunk guild and wait for gateway presence cache to populate
                 try:
                     await guild.chunk()
                 except Exception:
@@ -226,7 +229,6 @@ async def check_discord_bots():
                         continue
 
                     status_str = str(getattr(member, "status", "offline")).lower()
-                    # Consider online, idle, dnd, or any active presence as online
                     is_online = status_str in ["online", "idle", "dnd"] or bool(member.activities)
 
                     if is_online:
@@ -313,7 +315,6 @@ def post_webhook(content, embeds):
 
 
 def generate_dashboard(checks, state):
-    """Generates a secure, password-protected status web dashboard (index.html)"""
     items_html = ""
     all_operational = True
 
@@ -357,6 +358,9 @@ def generate_dashboard(checks, state):
         <p>One or more services are currently experiencing outages.</p>
     </div>
     """
+
+    # Securely hash the password secret in Python so the raw password never goes into git
+    pwd_hash = hashlib.sha256(DASHBOARD_PASSWORD.encode("utf-8")).hexdigest()
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -465,7 +469,6 @@ def generate_dashboard(checks, state):
     </style>
 </head>
 <body>
-    <!-- Simple Password Login Overlay -->
     <div id="login-overlay">
         <div class="login-box">
             <h2>🔒 Admin Login</h2>
@@ -494,8 +497,7 @@ def generate_dashboard(checks, state):
     </div>
 
     <script>
-        // Default password is 'admin123' - you can change it here!
-        const CORRECT_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a3"; // SHA-256 for 'admin123'
+        const CORRECT_HASH = "{pwd_hash}";
         
         async function sha256(message) {{
             const msgBuffer = new TextEncoder().encode(message);
@@ -515,7 +517,6 @@ def generate_dashboard(checks, state):
             }}
         }}
 
-        // Remember login session
         if (localStorage.getItem('auth_success') === 'true') {{
             document.getElementById('login-overlay').style.display = 'none';
         }}
