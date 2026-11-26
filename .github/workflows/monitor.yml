@@ -27,7 +27,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests dnspython discord.py
+        run: pip install requests dnspython discord.py cryptography
 
       - name: Run outage monitor
         env:
