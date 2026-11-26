@@ -7,6 +7,12 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-deployment"
+  cancel-in-progress: true
 
 jobs:
   check-status:
@@ -50,3 +56,15 @@ jobs:
             git commit -m "Update service status dashboard & state"
             git push
           fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
