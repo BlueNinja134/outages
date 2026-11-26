@@ -71,7 +71,7 @@ MC_SERVER_IPS = _env_list("MC_SERVER_IPS", "MC_SERVER_IP")
 ALERT_ROLE_ID = _env("ALERT_ROLE_ID")
 
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
-DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "System Watchdog")
+DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "Outages")
 DASHBOARD_URL = _env("DASHBOARD_URL")
 
 # A service is declared down after this many failed runs in a row (5 minutes apart).
