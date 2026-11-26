@@ -15,12 +15,12 @@ BOT_TOKEN = os.environ.get("MONITOR_BOT_TOKEN", "")
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
 TARGET_BOT_IDS = [int(x.strip()) for x in os.environ.get("BOT_IDS", "").split(",") if x.strip()]
 
-# Support single or multiple comma-separated websites and Minecraft servers
 WEBSITE_URLS = [x.strip() for x in os.environ.get("WEBSITE_URLS", os.environ.get("WEBSITE_URL", "")).split(",") if x.strip()]
 MC_SERVER_IPS = [x.strip() for x in os.environ.get("MC_SERVER_IPS", os.environ.get("MC_SERVER_IP", "")).split(",") if x.strip()]
 
 ALERT_ROLE_ID = os.environ.get("ALERT_ROLE_ID", "").strip()
 STATE_FILE = "status.json"
+DASHBOARD_FILE = "index.html"
 
 
 def log(level, message):
@@ -201,57 +201,55 @@ async def check_discord_bots():
                         f"Mention: <@{bot_id}>",
                     )
             else:
+                # Chunk guild and wait for gateway presence cache to populate
+                try:
+                    await guild.chunk()
+                except Exception:
+                    pass
+                await asyncio.sleep(3.0)
+
                 for bot_id in TARGET_BOT_IDS:
-                    try:
-                        member = await guild.fetch_member(bot_id)
-                        
-                        # Check multiple attributes to see if the bot is truly offline/disconnected
-                        # When a bot is offline, its raw_status or status typically evaluates to 'offline' or None
-                        raw_stat = getattr(member, "raw_status", str(member.status))
-                        
-                        # If the bot is completely offline, raw_status/status will be 'offline'
-                        is_online = raw_stat not in ["offline", "invisible"]
-                        
-                        # Extra safety check: if the bot has any active activity, it is definitely online
-                        if member.activities:
-                            is_online = True
+                    member = guild.get_member(bot_id)
+                    if not member:
+                        try:
+                            member = await guild.fetch_member(bot_id)
+                        except Exception:
+                            pass
 
-                        if is_online:
-                            status_label = f"Online ({raw_stat.upper()})"
-                            if member.activities:
-                                activity_names = [act.name for act in member.activities]
-                                status_label = f"Online ({', '.join(activity_names)})"
-                        else:
-                            status_label = "Status: OFFLINE"
-
-                        results[f"bot_{bot_id}"] = (
-                            f"🤖 {member.display_name}",
-                            is_online,
-                            status_label,
-                            f"Mention: <@{bot_id}>",
-                        )
-                    except discord.NotFound:
+                    if not member:
                         results[f"bot_{bot_id}"] = (
                             f"🤖 Bot ({bot_id})",
                             False,
                             "Missing from Discord server",
                             f"Mention: <@{bot_id}>",
                         )
-                    except Exception as ex:
-                        log("ERROR", f"Failed fetching member {bot_id}: {ex}")
-                        results[f"bot_{bot_id}"] = (
-                            f"🤖 Bot ({bot_id})",
-                            False,
-                            f"Error fetching member ({type(ex).__name__})",
-                            f"Mention: <@{bot_id}>",
-                        )
+                        continue
+
+                    status_str = str(getattr(member, "status", "offline")).lower()
+                    # Consider online, idle, dnd, or any active presence as online
+                    is_online = status_str in ["online", "idle", "dnd"] or bool(member.activities)
+
+                    if is_online:
+                        status_label = f"Online ({status_str.upper()})"
+                        if member.activities:
+                            activity_names = [act.name for act in member.activities]
+                            status_label = f"Online ({', '.join(activity_names)})"
+                    else:
+                        status_label = "Status: OFFLINE"
+
+                    results[f"bot_{bot_id}"] = (
+                        f"🤖 {member.display_name}",
+                        is_online,
+                        status_label,
+                        f"Mention: <@{bot_id}>",
+                    )
         except Exception as e:
             log("ERROR", f"Exception during bot check execution: {e}")
         finally:
             await client.close()
 
     try:
-        await asyncio.wait_for(client.start(BOT_TOKEN), timeout=30.0)
+        await asyncio.wait_for(client.start(BOT_TOKEN), timeout=35.0)
     except asyncio.TimeoutError:
         log("ERROR", "Discord bot check timed out.")
         try:
@@ -280,7 +278,6 @@ def post_webhook(content, embeds):
     for embed in embeds:
         fields = embed.get("fields", [])
         if len(fields) > 25:
-            log("INFO", "Chunking embed fields due to Discord's 25-field limit.")
             chunked_fields = [fields[i:i + 25] for i in range(0, len(fields), 25)]
             for idx, chunk in enumerate(chunked_fields):
                 chunk_embed = embed.copy()
@@ -313,6 +310,225 @@ def post_webhook(content, embeds):
         requests.post(WEBHOOK_URL, json=payload, timeout=10)
     except Exception as e:
         log("ERROR", f"Failed to send webhook alert: {e}")
+
+
+def generate_dashboard(checks, state):
+    """Generates a secure, password-protected status web dashboard (index.html)"""
+    items_html = ""
+    all_operational = True
+
+    for key, (name, is_online, status_text, extra) in checks.items():
+        if not is_online:
+            all_operational = False
+            badge = '<span class="badge offline">Offline</span>'
+            card_class = "card offline"
+        else:
+            badge = '<span class="badge online">Operational</span>'
+            card_class = "card online"
+
+        down_since = state.get(key)
+        downtime_info = ""
+        if down_since:
+            downtime_duration = format_duration(time.time() - down_since)
+            downtime_info = f'<div class="downtime">Down for: <strong>{downtime_duration}</strong></div>'
+
+        items_html += f"""
+        <div class="{card_class}">
+            <div class="card-header">
+                <h3>{name}</h3>
+                {badge}
+            </div>
+            <div class="card-body">
+                <p class="status-text">{status_text}</p>
+                <p class="extra-info">{extra}</p>
+                {downtime_info}
+            </div>
+        </div>
+        """
+
+    overall_banner = """
+    <div class="banner operational">
+        <h2>🟢 All Systems Operational</h2>
+        <p>Every monitored service is currently online and running smoothly.</p>
+    </div>
+    """ if all_operational else """
+    <div class="banner incident">
+        <h2>🚨 Active Incident Detected</h2>
+        <p>One or more services are currently experiencing outages.</p>
+    </div>
+    """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Status Dashboard</title>
+    <style>
+        :root {{
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --text-color: #c9d1d9;
+            --border-color: #30363d;
+            --online-color: #238636;
+            --offline-color: #da3633;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }}
+        .container {{
+            width: 100%;
+            max-width: 800px;
+        }}
+        #login-overlay {{
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(13, 17, 23, 0.95);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }}
+        .login-box {{
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }}
+        .login-box input {{
+            padding: 10px;
+            margin: 10px 0;
+            background: #0d1117;
+            border: 1px solid var(--border-color);
+            color: white;
+            border-radius: 4px;
+            width: 80%;
+        }}
+        .login-box button {{
+            padding: 10px 20px;
+            background: var(--online-color);
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }}
+        header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }}
+        .banner {{
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }}
+        .banner.operational {{ background: rgba(35, 134, 54, 0.15); border-color: var(--online-color); }}
+        .banner.incident {{ background: rgba(218, 54, 51, 0.15); border-color: var(--offline-color); }}
+        .card {{
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 15px;
+            padding: 20px;
+        }}
+        .card-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .badge {{
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }}
+        .badge.online {{ background-color: var(--online-color); }}
+        .badge.offline {{ background-color: var(--offline-color); }}
+        .card-body {{ margin-top: 10px; font-size: 14px; }}
+        .extra-info {{ color: #8b949e; font-family: monospace; }}
+        .downtime {{ color: var(--offline-color); margin-top: 5px; }}
+        footer {{ text-align: center; margin-top: 40px; color: #8b949e; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <!-- Simple Password Login Overlay -->
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2>🔒 Admin Login</h2>
+            <p>Enter password to view status dashboard</p>
+            <input type="password" id="password-input" placeholder="Password"><br>
+            <button onclick="checkPassword()">Login</button>
+            <p id="error-msg" style="color: var(--offline-color); font-size: 12px; display: none; margin-top: 10px;">Incorrect password</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>🛡️ System Watchdog</h1>
+            <span>Last Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</span>
+        </header>
+
+        {overall_banner}
+
+        <div class="services-list">
+            {items_html}
+        </div>
+
+        <footer>
+            Powered by System Watchdog & GitHub Pages
+        </footer>
+    </div>
+
+    <script>
+        // Default password is 'admin123' - you can change it here!
+        const CORRECT_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a3"; // SHA-256 for 'admin123'
+        
+        async function sha256(message) {{
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }}
+
+        async function checkPassword() {{
+            const pwd = document.getElementById('password-input').value;
+            const hash = await sha256(pwd);
+            if (hash === CORRECT_HASH) {{
+                document.getElementById('login-overlay').style.display = 'none';
+                localStorage.setItem('auth_success', 'true');
+            }} else {{
+                document.getElementById('error-msg').style.display = 'block';
+            }}
+        }}
+
+        // Remember login session
+        if (localStorage.getItem('auth_success') === 'true') {{
+            document.getElementById('login-overlay').style.display = 'none';
+        }}
+    </script>
+</body>
+</html>
+"""
+    try:
+        with open(DASHBOARD_FILE, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        log("INFO", "Successfully generated index.html status dashboard.")
+    except Exception as e:
+        log("ERROR", f"Failed to generate dashboard HTML: {e}")
 
 
 async def main():
@@ -396,6 +612,7 @@ async def main():
         post_webhook("", [recovery_embed])
 
     save_state(new_state)
+    generate_dashboard(checks, new_state)
 
 
 if __name__ == "__main__":
