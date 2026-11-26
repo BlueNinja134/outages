@@ -203,15 +203,26 @@ async def check_discord_bots():
             else:
                 for bot_id in TARGET_BOT_IDS:
                     try:
-                        # Fetch member to verify presence in guild (bypasses bot-to-bot presence restriction)
                         member = await guild.fetch_member(bot_id)
                         
-                        is_online = True 
-                        status_label = "Online (Active)"
+                        # Check multiple attributes to see if the bot is truly offline/disconnected
+                        # When a bot is offline, its raw_status or status typically evaluates to 'offline' or None
+                        raw_stat = getattr(member, "raw_status", str(member.status))
                         
+                        # If the bot is completely offline, raw_status/status will be 'offline'
+                        is_online = raw_stat not in ["offline", "invisible"]
+                        
+                        # Extra safety check: if the bot has any active activity, it is definitely online
                         if member.activities:
-                            activity_names = [act.name for act in member.activities]
-                            status_label = f"Online ({', '.join(activity_names)})"
+                            is_online = True
+
+                        if is_online:
+                            status_label = f"Online ({raw_stat.upper()})"
+                            if member.activities:
+                                activity_names = [act.name for act in member.activities]
+                                status_label = f"Online ({', '.join(activity_names)})"
+                        else:
+                            status_label = "Status: OFFLINE"
 
                         results[f"bot_{bot_id}"] = (
                             f"🤖 {member.display_name}",
