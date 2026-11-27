@@ -469,7 +469,19 @@ def apply_results(state, checks, now):
         try:
             parsed_json = json.loads(maint_input)
             if parsed_json:
-                maintenance_file.write_text(json.dumps(parsed_json), encoding="utf-8")
+                if isinstance(parsed_json, dict) and parsed_json.get("clear"):
+                    if maintenance_file.exists():
+                        maintenance_file.unlink()
+                else:
+                    # Merge or overwrite maintenance data
+                    existing_maint = {}
+                    if maintenance_file.exists():
+                        try:
+                            existing_maint = json.loads(maintenance_file.read_text(encoding="utf-8"))
+                        except Exception:
+                            pass
+                    existing_maint.update(parsed_json)
+                    maintenance_file.write_text(json.dumps(existing_maint), encoding="utf-8")
             else:
                 if maintenance_file.exists():
                     maintenance_file.unlink()
@@ -484,6 +496,8 @@ def apply_results(state, checks, now):
     if maintenance_file.exists():
         try:
             maint_data = json.loads(maintenance_file.read_text(encoding="utf-8"))
+            if maint_data.get("clear"):
+                maint_data = {}
         except Exception:
             pass
 
@@ -496,19 +510,20 @@ def apply_results(state, checks, now):
             maint_reason = maint_data[check.key]
             if isinstance(maint_reason, bool):
                 maint_reason = "Under maintenance"
-            check.ok = False
+            
+            # Treat as healthy/operational for users, but flagged as maintenance mode
+            check.ok = True
             check.detail = f"Under Maintenance: {maint_reason}"
-            svc["last"] = {"ok": False, "detail": check.detail, "latency": None, "info": "Maintenance"}
+            svc["last"] = {"ok": True, "detail": check.detail, "latency": None, "info": "Maintenance"}
 
-            svc["failures"] += 1
-            if svc["down_since"] is None:
-                svc["down_since"] = now
-            if not svc["alerted"]:
-                svc["alerted"] = True
-                state["incidents"].append(
-                    {"key": check.key, "name": check.name, "start": svc["down_since"],
-                     "end": None, "reason": check.detail})
-                outages.append((check, svc["down_since"]))
+            # Clear any active outage since it's scheduled maintenance
+            if svc["alerted"]:
+                for inc in reversed(state["incidents"]):
+                    if inc["key"] == check.key and inc["end"] is None:
+                        inc["end"] = now
+                        break
+                recoveries.append((check, now - (svc["down_since"] or now), uptime_pct(svc, now, 1)))
+            svc.update(down_since=None, failures=0, alerted=False)
             continue
 
         svc["last"] = {"ok": check.ok, "detail": check.detail, "latency": check.latency_ms, "info": check.info}
