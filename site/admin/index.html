@@ -1,66 +1,100 @@
-<script>
-    const adminCheckInterval = setInterval(() => {
-        const isEncryptedAdminPath = window.location.pathname.includes("/admin/");
-        const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Status Dashboard</title>
+    <!-- Your existing styles and head contents -->
+</head>
+<body>
+    <!-- Your main dashboard content rendered by your template engine -->
+    <div id="app"></div>
 
-        if (isEncryptedAdminPath && isUnlocked && !document.getElementById("admin-maintenance-box")) {
-            clearInterval(adminCheckInterval);
-            const box = document.createElement("div");
-            box.id = "admin-maintenance-box";
-            box.style.cssText = "max-width: 900px; margin: 40px auto 20px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9;";
-            box.innerHTML = `
-                <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
-                <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
-                <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
-                </div>
-                <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
-                    <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
-                    <span id="maint-status" style="font-size: 13px;"></span>
-                </div>
-            `;
-            document.body.appendChild(box);
+    <!-- Maintenance Panel (Hidden by default, shown only when admin is unlocked) -->
+    <div id="admin-maintenance-card" style="display: none; max-width: 900px; margin: 40px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
+        <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
+        
+        <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
+        </div>
+
+        <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
+        
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
+            <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
+            <span id="maint-status" style="font-size: 13px;"></span>
+        </div>
+    </div>
+
+    <!-- Dashboard Data Payload -->
+    <script>
+        window.DASHBOARD_DATA = {"mode":"encrypted","iter":600000,"salt":"Qf4ofcubJraU9unNRk5pjA==","iv":"viL2ylC09D1tErq0","ct":"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"};
+    </script>
+
+    <!-- Safe Admin Detection & API Scripts -->
+    <script>
+        // Reveal maintenance card only if on /admin/ and unlocked
+        window.addEventListener("DOMContentLoaded", () => {
+            const checkUnlock = setInterval(() => {
+                const isAdminPath = window.location.pathname.includes("/admin/");
+                const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+                
+                if (isAdminPath && isUnlocked) {
+                    const card = document.getElementById("admin-maintenance-card");
+                    if (card) card.style.display = "block";
+                    clearInterval(checkUnlock);
+                }
+            }, 300);
+        });
+
+        async function submitMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Updating...";
+            statusEl.style.color = "#8b949e";
+            
+            const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
+            const reason = document.getElementById("maint-reason").value || "Under maintenance";
+            
+            let payload = {};
+            checkboxes.forEach(cb => { payload[cb.value] = reason; });
+
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
+                const response = await fetch(workerUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    statusEl.style.color = "#57F287";
+                    statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
+                } else {
+                    throw new Error("Failed");
+                }
+            } catch (err) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Error triggering update.";
+            }
         }
-    }, 500);
 
-    async function submitMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Updating...";
-        statusEl.style.color = "#8b949e";
-        const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
-        const reason = document.getElementById("maint-reason").value || "Under maintenance";
-        let payload = {};
-        checkboxes.forEach(cb => { payload[cb.value] = reason; });
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
-            const response = await fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-            if (response.ok) {
+        async function clearMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Clearing...";
+            statusEl.style.color = "#8b949e";
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
+                await fetch(workerUrl);
                 statusEl.style.color = "#57F287";
-                statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
-            } else { throw new Error("Failed"); }
-        } catch (err) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Error triggering update.";
+                statusEl.innerText = "✅ Maintenance cleared!";
+            } catch (e) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Failed to clear.";
+            }
         }
-    }
-
-    async function clearMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Clearing...";
-        statusEl.style.color = "#8b949e";
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
-            await fetch(workerUrl);
-            statusEl.style.color = "#57F287";
-            statusEl.innerText = "✅ Maintenance cleared!";
-        } catch (e) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Failed to clear.";
-        }
-    }
-</script>
+    </script>
+</body>
+</html>

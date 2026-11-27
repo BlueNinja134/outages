@@ -1,66 +1,100 @@
-<script>
-    const adminCheckInterval = setInterval(() => {
-        const isEncryptedAdminPath = window.location.pathname.includes("/admin/");
-        const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Status Dashboard</title>
+    <!-- Your existing styles and head contents -->
+</head>
+<body>
+    <!-- Your main dashboard content rendered by your template engine -->
+    <div id="app"></div>
 
-        if (isEncryptedAdminPath && isUnlocked && !document.getElementById("admin-maintenance-box")) {
-            clearInterval(adminCheckInterval);
-            const box = document.createElement("div");
-            box.id = "admin-maintenance-box";
-            box.style.cssText = "max-width: 900px; margin: 40px auto 20px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9;";
-            box.innerHTML = `
-                <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
-                <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
-                <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
-                </div>
-                <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
-                    <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
-                    <span id="maint-status" style="font-size: 13px;"></span>
-                </div>
-            `;
-            document.body.appendChild(box);
+    <!-- Maintenance Panel (Hidden by default, shown only when admin is unlocked) -->
+    <div id="admin-maintenance-card" style="display: none; max-width: 900px; margin: 40px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
+        <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
+        
+        <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
+        </div>
+
+        <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
+        
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
+            <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
+            <span id="maint-status" style="font-size: 13px;"></span>
+        </div>
+    </div>
+
+    <!-- Dashboard Data Payload -->
+    <script>
+        window.DASHBOARD_DATA = {"mode":"plain","payload":{"title":"Outages","generated":1795806985,"interval":300,"threshold":2,"days_end":"2026-11-27","services":[{"key":"website","name":"Website","kind":"website","target":"https://discycrafteu.falix.org","status":"down","detail":"HTTP 503","info":"","latency":438,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,17]],"recent":[[1795803334,0,1358],[1795803622,0,506],[1795803921,0,322],[1795804517,0,441],[1795804598,0,437],[1795804767,0,507],[1795804817,0,428],[1795805119,0,428],[1795805419,0,309],[1795805466,0,520],[1795805714,0,446],[1795805900,0,510],[1795806127,0,473],[1795806388,0,468],[1795806677,0,397],[1795806775,0,315],[1795806985,0,438]]},{"key":"minecraft","name":"Minecraft server","kind":"minecraft","target":"piglin.hostify.cz:57390","status":"up","detail":"0 of 50 players online","info":"Version \u00a74Maintenance","latency":1544,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[18,18]],"recent":[[1795803334,1,1292],[1795803622,1,1490],[1795803921,1,1442],[1795804517,1,1694],[1795804598,1,1512],[1795804767,1,1520],[1795804817,1,1606],[1795804982,1,1691],[1795805119,1,1535],[1795805419,1,1424],[1795805466,1,1516],[1795805714,1,1593],[1795805900,1,1592],[1795806127,1,1614],[1795806388,1,1594],[1795806677,1,1631],[1795806775,1,1431],[1795806985,1,1544]]},{"key":"bot_1376227676292907150","name":"DiscyCraft.eu","kind":"bot","target":"ID 1376227676292907150","status":"up","detail":"Online (online)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[18,18]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null]]},{"key":"bot_1514298483111231538","name":"Minecraft Connect","kind":"bot","target":"ID 1514298483111231538","status":"up","detail":"Online (dnd)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[18,18]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null]]},{"key":"bot_1530668103820906656","name":"Web Connect","kind":"bot","target":"ID 1530668103820906656","status":"down","detail":"Offline","info":"","latency":null,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,18]],"recent":[[1795803334,0,null],[1795803622,0,null],[1795803921,0,null],[1795804517,0,null],[1795804598,0,null],[1795804767,0,null],[1795804817,0,null],[1795804982,0,null],[1795805119,0,null],[1795805419,0,null],[1795805466,0,null],[1795805714,0,null],[1795805900,0,null],[1795806127,0,null],[1795806388,0,null],[1795806677,0,null],[1795806775,0,null],[1795806985,0,null]]}],"incidents":[{"name":"Web Connect","start":1795803334,"end":null,"reason":"Offline"},{"name":"Website","start":1795803334,"end":null,"reason":"HTTP 503"}]}};
+    </script>
+
+    <!-- Safe Admin Detection & API Scripts -->
+    <script>
+        // Reveal maintenance card only if on /admin/ and unlocked
+        window.addEventListener("DOMContentLoaded", () => {
+            const checkUnlock = setInterval(() => {
+                const isAdminPath = window.location.pathname.includes("/admin/");
+                const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+                
+                if (isAdminPath && isUnlocked) {
+                    const card = document.getElementById("admin-maintenance-card");
+                    if (card) card.style.display = "block";
+                    clearInterval(checkUnlock);
+                }
+            }, 300);
+        });
+
+        async function submitMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Updating...";
+            statusEl.style.color = "#8b949e";
+            
+            const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
+            const reason = document.getElementById("maint-reason").value || "Under maintenance";
+            
+            let payload = {};
+            checkboxes.forEach(cb => { payload[cb.value] = reason; });
+
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
+                const response = await fetch(workerUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    statusEl.style.color = "#57F287";
+                    statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
+                } else {
+                    throw new Error("Failed");
+                }
+            } catch (err) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Error triggering update.";
+            }
         }
-    }, 500);
 
-    async function submitMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Updating...";
-        statusEl.style.color = "#8b949e";
-        const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
-        const reason = document.getElementById("maint-reason").value || "Under maintenance";
-        let payload = {};
-        checkboxes.forEach(cb => { payload[cb.value] = reason; });
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
-            const response = await fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-            if (response.ok) {
+        async function clearMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Clearing...";
+            statusEl.style.color = "#8b949e";
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
+                await fetch(workerUrl);
                 statusEl.style.color = "#57F287";
-                statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
-            } else { throw new Error("Failed"); }
-        } catch (err) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Error triggering update.";
+                statusEl.innerText = "✅ Maintenance cleared!";
+            } catch (e) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Failed to clear.";
+            }
         }
-    }
-
-    async function clearMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Clearing...";
-        statusEl.style.color = "#8b949e";
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
-            await fetch(workerUrl);
-            statusEl.style.color = "#57F287";
-            statusEl.innerText = "✅ Maintenance cleared!";
-        } catch (e) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Failed to clear.";
-        }
-    }
-</script>
+    </script>
+</body>
+</html>
