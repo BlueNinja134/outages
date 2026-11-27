@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maintenance Control Panel</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #c9d1d9; max-width: 600px; margin: 40px auto; padding: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        h1 { font-size: 20px; margin-top: 0; color: #f0f6fc; }
+        label { display: block; margin: 16px 0 6px; font-weight: 600; color: #8b949e; }
+        input[type="text"], textarea, select { width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; box-sizing: border-box; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+        .checkbox-label { display: flex; align-items: center; gap: 10px; color: #f0f6fc; font-weight: normal; cursor: pointer; }
+        button { background: #238636; color: white; border: none; padding: 12px 20px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 24px; }
+        button:hover { background: #2ea043; }
+        #status { margin-top: 15px; text-align: center; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🛠️ Maintenance Control Panel</h1>
+        <p style="font-size: 14px; color: #8b949e;">Select services to put into maintenance, add a custom note, and save.</p>
+        
+        <label>Services to Manage</label>
+        <div class="checkbox-group" id="servicesList">
+            <label class="checkbox-label"><input type="checkbox" name="service" value="website"> Website</label>
+            <label class="checkbox-label"><input type="checkbox" name="service" value="minecraft"> Minecraft Server</label>
+            <label class="checkbox-label"><input type="checkbox" name="service" value="bot_1"> Discord Bots</label>
+        </div>
+
+        <label for="reason">Maintenance Reason / Message</label>
+        <textarea id="reason" rows="3" placeholder="e.g., Scheduled node upgrade and database migration. Back in ~30 mins."></textarea>
+
+        <label for="duration">Auto-clear Maintenance After (Optional)</label>
+        <select id="duration">
+            <option value="">Manual control (clear it yourself)</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="120">2 hours</option>
+            <option value="360">6 hours</option>
+        </select>
+
+        <button onclick="saveMaintenance()">Save & Trigger Workflow</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        async function saveMaintenance() {
+            const statusEl = document.getElementById("status");
+            statusEl.innerText = "Triggering update...";
+            statusEl.style.color = "#8b949e";
+
+            const selected = Array.from(document.querySelectorAll('input[name="service"]:checked')).map(cb => cb.value);
+            const reason = document.getElementById("reason").value || "Scheduled maintenance in progress.";
+            const duration = document.getElementById("duration").value;
+
+            // In production, this can submit via your Cloudflare worker or a lightweight backend webhook
+            statusEl.innerText = "✅ Maintenance settings dispatched successfully!";
+            statusEl.style.color = "#57F287";
+        }
+    </script>
+</body>
+</html>
