@@ -65,9 +65,6 @@ jobs:
             echo "No changes to commit"
           fi
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
       - name: Clean site folder links
         run: find site -type l -delete
 
@@ -75,6 +72,13 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'site'
+
+  deploy:
+    needs: check-status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
 
       - name: Deploy to GitHub Pages
         id: deployment
