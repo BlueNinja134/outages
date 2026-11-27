@@ -279,6 +279,7 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PW_KEY = "watchdog-pw";
+  const WORKER_ENDPOINT = "https://github-outage-trigger.blueninja5135.workers.dev/";
 
   let blob = JSON.parse($("#dashboard-data").textContent);
   let password = null;
@@ -441,15 +442,17 @@
     $("#services").innerHTML = data.services.map(service).join("");
     $("#incidents").innerHTML = incidents();
     
+    // Dynamically generate checkboxes for all configured services
+    const checkboxesHtml = data.services.map(s => 
+      `<label><input type="checkbox" name="maint-svc" value="${esc(s.key)}"> ${esc(s.name)}</label>`
+    ).join("");
+
     $("#admin-container").innerHTML = isAdmin ? `
       <div class="admin-panel">
         <div class="admin-card">
           <h3>🛠️ Quick Maintenance Control</h3>
           <p>Select services to place into maintenance mode immediately:</p>
-          <div class="admin-checkboxes">
-            <label><input type="checkbox" name="maint-svc" value="website"> Website</label>
-            <label><input type="checkbox" name="maint-svc" value="minecraft"> Minecraft</label>
-          </div>
+          <div class="admin-checkboxes">${checkboxesHtml}</div>
           <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)">
           <div class="admin-actions">
             <button class="admin-btn" onclick="submitMaintenance()">Apply Maintenance</button>
@@ -523,22 +526,30 @@
   });
   $("#lock-btn").addEventListener("click", lock);
 
+  // ---------- Secure Maintenance API Actions ----------
   window.submitMaintenance = async function() {
     const statusEl = $("#maint-status");
+    const checkboxes = document.querySelectorAll('input[name="maint-svc"]:checked');
+    if (!checkboxes.length) {
+      statusEl.style.color = "var(--warn)";
+      statusEl.textContent = "Select at least one service.";
+      return;
+    }
+
     statusEl.textContent = "Updating...";
     statusEl.style.color = "var(--muted)";
     
-    const checkboxes = document.querySelectorAll('input[name="maint-svc"]:checked');
     const reason = $("#maint-reason").value || "Under maintenance";
-    
     let payload = {};
     checkboxes.forEach(cb => { payload[cb.value] = reason; });
 
     try {
-      const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
-      const response = await fetch(workerUrl, {
+      const response = await fetch(WORKER_ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${password}`
+        },
         body: JSON.stringify(payload)
       });
 
@@ -546,7 +557,7 @@
         statusEl.style.color = "var(--up)";
         statusEl.textContent = "✅ Triggered! GitHub will update in ~45s.";
       } else {
-        throw new Error("Failed");
+        throw new Error(`HTTP ${response.status}`);
       }
     } catch (err) {
       statusEl.style.color = "var(--down)";
@@ -559,10 +570,21 @@
     statusEl.textContent = "Clearing...";
     statusEl.style.color = "var(--muted)";
     try {
-      const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
-      await fetch(workerUrl);
-      statusEl.style.color = "var(--up)";
-      statusEl.textContent = "✅ Maintenance cleared!";
+      const response = await fetch(WORKER_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${password}`
+        },
+        body: JSON.stringify({ clear: true })
+      });
+
+      if (response.ok) {
+        statusEl.style.color = "var(--up)";
+        statusEl.textContent = "✅ Maintenance cleared!";
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
     } catch (e) {
       statusEl.style.color = "var(--down)";
       statusEl.textContent = "❌ Failed to clear.";
