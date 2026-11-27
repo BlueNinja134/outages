@@ -461,7 +461,25 @@ def apply_results(state, checks, now):
     for stale_key in [k for k in services if k not in {c.key for c in checks}]:
         del services[stale_key]
 
+    # Handle workflow maintenance inputs / maintenance.json overrides
+    maint_input = os.environ.get("MAINTENANCE_TARGETS", "").strip()
     maintenance_file = Path("maintenance.json")
+    
+    if maint_input:
+        try:
+            parsed_json = json.loads(maint_input)
+            if parsed_json:
+                maintenance_file.write_text(json.dumps(parsed_json), encoding="utf-8")
+            else:
+                if maintenance_file.exists():
+                    maintenance_file.unlink()
+        except json.JSONDecodeError:
+            if maint_input.lower() == "false" or not maint_input:
+                if maintenance_file.exists():
+                    maintenance_file.unlink()
+            else:
+                maintenance_file.write_text(json.dumps({maint_input: "Under maintenance"}), encoding="utf-8")
+
     maint_data = {}
     if maintenance_file.exists():
         try:
@@ -473,9 +491,11 @@ def apply_results(state, checks, now):
         svc = services.setdefault(check.key, new_service())
         svc.update(name=check.name, kind=check.kind, target=check.target)
 
-        # Check if service is listed in maintenance.json override
+        # Check if service is listed in maintenance overrides
         if check.key in maint_data:
             maint_reason = maint_data[check.key]
+            if isinstance(maint_reason, bool):
+                maint_reason = "Under maintenance"
             check.ok = False
             check.detail = f"Under Maintenance: {maint_reason}"
             svc["last"] = {"ok": False, "detail": check.detail, "latency": None, "info": "Maintenance"}
