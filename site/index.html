@@ -3,57 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Status Dashboard</title>
-    <!-- Your existing styles and head contents -->
+    <title>Outages Status</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --green: #238636;
+            --red: #da3633;
+            --up: #57F287;
+            --down: #ED4245;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .service-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .service-row:last-child { border-bottom: none; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge.up { background: rgba(87, 242, 135, 0.15); color: var(--up); }
+        .badge.down { background: rgba(237, 66, 69, 0.15); color: var(--down); }
+        .login-box { max-width: 400px; margin: 80px auto; text-align: center; }
+        input[type="password"], input[type="text"] { width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; box-sizing: border-box; margin-bottom: 12px; }
+        button { background: var(--green); color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button:hover { opacity: 0.9; }
+        .admin-panel { margin-top: 40px; border-top: 1px dashed var(--border); padding-top: 24px; display: none; }
+    </style>
 </head>
 <body>
-    <!-- Your main dashboard content rendered by your template engine -->
-    <div id="app"></div>
-
-    <!-- Maintenance Panel (Hidden by default, shown only when admin is unlocked) -->
-    <div id="admin-maintenance-card" style="display: none; max-width: 900px; margin: 40px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
-        <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
-        
-        <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
-            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
-            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
-        </div>
-
-        <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
-        
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
-            <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
-            <span id="maint-status" style="font-size: 13px;"></span>
+    <div class="container" id="app">
+        <div class="card">
+            <h2>Loading status...</h2>
         </div>
     </div>
 
-    <!-- Dashboard Data Payload -->
+    <!-- Embedded Dashboard Data Payload -->
     <script>
-        window.DASHBOARD_DATA = {"mode":"plain","payload":{"title":"Outages","generated":1795807257,"interval":300,"threshold":2,"days_end":"2026-11-27","services":[{"key":"website","name":"Website","kind":"website","target":"https://discycrafteu.falix.org","status":"down","detail":"HTTP 503","info":"","latency":493,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,18]],"recent":[[1795803334,0,1358],[1795803622,0,506],[1795803921,0,322],[1795804517,0,441],[1795804598,0,437],[1795804767,0,507],[1795804817,0,428],[1795805119,0,428],[1795805419,0,309],[1795805466,0,520],[1795805714,0,446],[1795805900,0,510],[1795806127,0,473],[1795806388,0,468],[1795806677,0,397],[1795806775,0,315],[1795806985,0,438],[1795807257,0,493]]},{"key":"minecraft","name":"Minecraft server","kind":"minecraft","target":"piglin.hostify.cz:57390","status":"up","detail":"0 of 50 players online","info":"Version \u00a74Maintenance","latency":656,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[19,19]],"recent":[[1795803334,1,1292],[1795803622,1,1490],[1795803921,1,1442],[1795804517,1,1694],[1795804598,1,1512],[1795804767,1,1520],[1795804817,1,1606],[1795804982,1,1691],[1795805119,1,1535],[1795805419,1,1424],[1795805466,1,1516],[1795805714,1,1593],[1795805900,1,1592],[1795806127,1,1614],[1795806388,1,1594],[1795806677,1,1631],[1795806775,1,1431],[1795806985,1,1544],[1795807257,1,656]]},{"key":"bot_1376227676292907150","name":"DiscyCraft.eu","kind":"bot","target":"ID 1376227676292907150","status":"up","detail":"Online (online)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[19,19]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null],[1795807257,1,null]]},{"key":"bot_1514298483111231538","name":"Minecraft Connect","kind":"bot","target":"ID 1514298483111231538","status":"up","detail":"Online (dnd)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[19,19]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null],[1795807257,1,null]]},{"key":"bot_1530668103820906656","name":"Web Connect","kind":"bot","target":"ID 1530668103820906656","status":"down","detail":"Offline","info":"","latency":null,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,19]],"recent":[[1795803334,0,null],[1795803622,0,null],[1795803921,0,null],[1795804517,0,null],[1795804598,0,null],[1795804767,0,null],[1795804817,0,null],[1795804982,0,null],[1795805119,0,null],[1795805419,0,null],[1795805466,0,null],[1795805714,0,null],[1795805900,0,null],[1795806127,0,null],[1795806388,0,null],[1795806677,0,null],[1795806775,0,null],[1795806985,0,null],[1795807257,0,null]]}],"incidents":[{"name":"Web Connect","start":1795803334,"end":null,"reason":"Offline"},{"name":"Website","start":1795803334,"end":null,"reason":"HTTP 503"}]}};
+        window.BLOB = {"mode":"plain","payload":{"title":"Outages","generated":1795807497,"interval":300,"threshold":2,"days_end":"2026-11-27","services":[{"key":"website","name":"Website","kind":"website","target":"https://discycrafteu.falix.org","status":"down","detail":"HTTP 503","info":"","latency":522,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,19]],"recent":[[1795803334,0,1358],[1795803622,0,506],[1795803921,0,322],[1795804517,0,441],[1795804598,0,437],[1795804767,0,507],[1795804817,0,428],[1795805119,0,428],[1795805419,0,309],[1795805466,0,520],[1795805714,0,446],[1795805900,0,510],[1795806127,0,473],[1795806388,0,468],[1795806677,0,397],[1795806775,0,315],[1795806985,0,438],[1795807257,0,493],[1795807497,0,522]]},{"key":"minecraft","name":"Minecraft server","kind":"minecraft","target":"piglin.hostify.cz:57390","status":"up","detail":"0 of 50 players online","info":"Version \u00a74Maintenance","latency":1464,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[20,20]],"recent":[[1795803334,1,1292],[1795803622,1,1490],[1795803921,1,1442],[1795804517,1,1694],[1795804598,1,1512],[1795804767,1,1520],[1795804817,1,1606],[1795804982,1,1691],[1795805119,1,1535],[1795805419,1,1424],[1795805466,1,1516],[1795805714,1,1593],[1795805900,1,1592],[1795806127,1,1614],[1795806388,1,1594],[1795806677,1,1631],[1795806775,1,1431],[1795806985,1,1544],[1795807257,1,656],[1795807497,1,1464]]},{"key":"bot_1376227676292907150","name":"DiscyCraft.eu","kind":"bot","target":"ID 1376227676292907150","status":"up","detail":"Online (online)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[20,20]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null],[1795807257,1,null],[1795807497,1,null]]},{"key":"bot_1514298483111231538","name":"Minecraft Connect","kind":"bot","target":"ID 1514298483111231538","status":"up","detail":"Online (dnd)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[20,20]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null],[1795805900,1,null],[1795806127,1,null],[1795806388,1,null],[1795806677,1,null],[1795806775,1,null],[1795806985,1,null],[1795807257,1,null],[1795807497,1,null]]},{"key":"bot_1530668103820906656","name":"Web Connect","kind":"bot","target":"ID 1530668103820906656","status":"down","detail":"Offline","info":"","latency":null,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,20]],"recent":[[1795803334,0,null],[1795803622,0,null],[1795803921,0,null],[1795804517,0,null],[1795804598,0,null],[1795804767,0,null],[1795804817,0,null],[1795804982,0,null],[1795805119,0,null],[1795805419,0,null],[1795805466,0,null],[1795805714,0,null],[1795805900,0,null],[1795806127,0,null],[1795806388,0,null],[1795806677,0,null],[1795806775,0,null],[1795806985,0,null],[1795807257,0,null],[1795807497,0,null]]}],"incidents":[{"name":"Web Connect","start":1795803334,"end":null,"reason":"Offline"},{"name":"Website","start":1795803334,"end":null,"reason":"HTTP 503"}]}};
     </script>
 
-    <!-- Safe Admin Detection & API Scripts -->
+    <!-- Dashboard Renderer & Admin Maintenance Logic -->
     <script>
-        // Reveal maintenance card only if on /admin/ and unlocked
-        window.addEventListener("DOMContentLoaded", () => {
-            const checkUnlock = setInterval(() => {
-                const isAdminPath = window.location.pathname.includes("/admin/");
-                const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
-                
-                if (isAdminPath && isUnlocked) {
-                    const card = document.getElementById("admin-maintenance-card");
-                    if (card) card.style.display = "block";
-                    clearInterval(checkUnlock);
+        async function decryptPayload(blob, password) {
+            const enc = new TextEncoder();
+            const dec = new TextDecoder();
+            const salt = Uint8Array.from(atob(blob.salt), c => c.charCodeAt(0));
+            const iv = Uint8Array.from(atob(blob.iv), c => c.charCodeAt(0));
+            const ct = Uint8Array.from(atob(blob.ct), c => c.charCodeAt(0));
+
+            const keyMaterial = await crypto.subtle.importKey(
+                "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
+            );
+            const key = await crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: salt, iterations: blob.iter, hash: "SHA-256" },
+                keyMaterial, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+            );
+            const decrypted = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv }, key, ct
+            );
+            return JSON.parse(dec.decode(decrypted));
+        }
+
+        async function init() {
+            const app = document.getElementById("app");
+            const blob = window.BLOB;
+
+            if (blob.mode === "plain") {
+                renderDashboard(blob.payload, false);
+            } else {
+                // Encrypted admin page
+                const savedPass = sessionStorage.getItem("dashboard_password");
+                if (savedPass) {
+                    try {
+                        const payload = await decryptPayload(blob, savedPass);
+                        renderDashboard(payload, true);
+                        return;
+                    } catch (e) {
+                        sessionStorage.removeItem("dashboard_password");
+                    }
                 }
-            }, 300);
-        });
+                renderLogin();
+            }
+        }
+
+        function renderLogin() {
+            const app = document.getElementById("app");
+            app.innerHTML = `
+                <div class="card login-box">
+                    <h2>🔒 Admin Login</h2>
+                    <p style="color: var(--text-muted); font-size: 13px;">Enter your dashboard password to access management controls.</p>
+                    <form onsubmit="handleLogin(event)">
+                        <input type="password" id="pass" placeholder="Password" required>
+                        <button type="submit" style="width: 100%;">Unlock Dashboard</button>
+                        <div id="login-err" style="color: var(--down); font-size: 13px; margin-top: 10px;"></div>
+                    </form>
+                </div>
+            `;
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const pass = document.getElementById("pass").value;
+            const errEl = document.getElementById("login-err");
+            try {
+                const payload = await decryptPayload(window.BLOB, pass);
+                sessionStorage.setItem("dashboard_password", pass);
+                window.isAdminUnlocked = true;
+                renderDashboard(payload, true);
+            } catch (err) {
+                errEl.innerText = "Incorrect password.";
+            }
+        }
+
+        function renderDashboard(data, isAdmin) {
+            const app = document.getElementById("app");
+            let servicesHtml = data.services.map(s => `
+                <div class="service-row">
+                    <div>
+                        <strong>${s.name}</strong><br>
+                        <small style="color: var(--text-muted);">${s.target} - ${s.detail}</small>
+                    </div>
+                    <div>
+                        <span class="badge ${s.status === 'up' ? 'up' : 'down'}">${s.status.toUpperCase()}</span>
+                    </div>
+                </div>
+            `).join("");
+
+            app.innerHTML = `
+                <div class="header">
+                    <h1>${data.title}</h1>
+                    ${isAdmin ? '<button onclick="handleLogout()" style="background: var(--red);">Logout</button>' : ''}
+                </div>
+                <div class="card">
+                    <h3>Services Overview</h3>
+                    ${servicesHtml}
+                </div>
+
+                ${isAdmin ? `
+                <div class="card admin-panel" id="admin-maintenance-card" style="display: block;">
+                    <h3 style="margin-top: 0; color: #f0f6fc;">🛠️ Quick Maintenance Control</h3>
+                    <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
+                    
+                    <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
+                        <label style="cursor: pointer;"><input type="checkbox" value="website"> Website</label>
+                        <label style="cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
+                    </div>
+
+                    <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)">
+                    
+                    <div style="display: flex; gap: 10px; align-items: center; margin-top: 12px;">
+                        <button onclick="submitMaintenance()">Apply Maintenance</button>
+                        <button onclick="clearMaintenance()" style="background: var(--red);">Clear All</button>
+                        <span id="maint-status" style="font-size: 13px;"></span>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+        }
+
+        function handleLogout() {
+            sessionStorage.removeItem("dashboard_password");
+            init();
+        }
 
         async function submitMaintenance() {
             const statusEl = document.getElementById("maint-status");
             statusEl.innerText = "Updating...";
-            statusEl.style.color = "#8b949e";
+            statusEl.style.color = "var(--text-muted)";
             
             const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
             const reason = document.getElementById("maint-reason").value || "Under maintenance";
@@ -70,13 +188,13 @@
                 });
 
                 if (response.ok) {
-                    statusEl.style.color = "#57F287";
+                    statusEl.style.color = "var(--up)";
                     statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
                 } else {
                     throw new Error("Failed");
                 }
             } catch (err) {
-                statusEl.style.color = "#ED4245";
+                statusEl.style.color = "var(--down)";
                 statusEl.innerText = "❌ Error triggering update.";
             }
         }
@@ -84,17 +202,19 @@
         async function clearMaintenance() {
             const statusEl = document.getElementById("maint-status");
             statusEl.innerText = "Clearing...";
-            statusEl.style.color = "#8b949e";
+            statusEl.style.color = "var(--text-muted)";
             try {
                 const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
                 await fetch(workerUrl);
-                statusEl.style.color = "#57F287";
+                statusEl.style.color = "var(--up)";
                 statusEl.innerText = "✅ Maintenance cleared!";
             } catch (e) {
-                statusEl.style.color = "#ED4245";
+                statusEl.style.color = "var(--down)";
                 statusEl.innerText = "❌ Failed to clear.";
             }
         }
+
+        init();
     </script>
 </body>
 </html>
