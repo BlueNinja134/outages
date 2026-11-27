@@ -473,7 +473,6 @@ def apply_results(state, checks, now):
                     if maintenance_file.exists():
                         maintenance_file.unlink()
                 else:
-                    # Merge or overwrite maintenance data
                     existing_maint = {}
                     if maintenance_file.exists():
                         try:
@@ -511,12 +510,10 @@ def apply_results(state, checks, now):
             if isinstance(maint_reason, bool):
                 maint_reason = "Under maintenance"
             
-            # Treat as healthy/operational for users, but flagged as maintenance mode
             check.ok = True
             check.detail = f"Under Maintenance: {maint_reason}"
             svc["last"] = {"ok": True, "detail": check.detail, "latency": None, "info": "Maintenance"}
 
-            # Clear any active outage since it's scheduled maintenance
             if svc["alerted"]:
                 for inc in reversed(state["incidents"]):
                     if inc["key"] == check.key and inc["end"] is None:
