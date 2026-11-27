@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       maintenance:
-        description: 'Set website to maintenance mode'
+        description: 'Set services to maintenance (e.g. website, minecraft, bot_123)'
         required: false
-        default: 'false'
-        type: boolean
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -43,7 +43,7 @@ jobs:
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
           ALERT_ROLE_ID: ${{ secrets.ALERT_ROLE_ID }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-          MAINTENANCE_MODE: ${{ github.event.inputs.maintenance }}
+          MAINTENANCE_TARGETS: ${{ github.event.inputs.maintenance }}
         run: python monitor.py
 
       - name: Save status state
@@ -54,7 +54,7 @@ jobs:
           git add status.json
           if ! git diff --cached --quiet; then
             git commit -m "Update service status state [skip ci]"
-            git pull --rebase origin main
+            git pull origin main --no-rebase || git stash && git pull origin main --no-rebase && git stash pop || true
             git push origin HEAD:main
           else
             echo "No changes to status.json"
