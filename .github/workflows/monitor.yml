@@ -45,7 +45,7 @@ jobs:
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
           ALERT_ROLE_ID: ${{ secrets.ALERT_ROLE_ID }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-          MAINTENANCE_TARGETS: ${{ github.event.inputs.maintenance }}
+          MAINTENANCE_TARGETS: ${{ github.event.inputs.maintenance || '' }}
         run: python monitor.py
 
       - name: Save status state
@@ -83,3 +83,9 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+```[cite: 6, 7]
+
+<ElicitationsGroup message="If you run into any other workflow or state issues:">
+  <Elicitation label="Still not showing cron runs" query="I updated the workflow file, but scheduled actions are still not showing up. What else could pause them?"/>
+  <Elicitation label="Python script error" query="How do I check the python script output logs if a scheduled action fails silently?"/>
+</ElicitationsGroup>
