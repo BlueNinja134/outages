@@ -511,7 +511,7 @@ def apply_results(state, checks, now):
                 maint_reason = "Under maintenance"
             
             check.ok = True
-            check.detail = f"Under Maintenance: {maint_reason}"
+            check.detail = f"Under maintenance: {maint_reason}"
             svc["last"] = {"ok": True, "detail": check.detail, "latency": None, "info": "Maintenance"}
 
             if svc["alerted"]:
@@ -581,6 +581,8 @@ def service_status(svc):
     last = svc.get("last") or {}
     if last.get("ok") is None:
         return "unknown"
+    if last.get("info") == "Maintenance":
+        return "degraded"
     if last["ok"]:
         return "up"
     return "down" if svc["alerted"] else "degraded"
@@ -811,7 +813,7 @@ async def main(args):
         verdict = {True: "up", False: "DOWN", None: "unknown"}[c.ok]
         log("INFO", f"{c.name}: {verdict} ({c.detail})")
 
-    outages, recoveries, cert_warnings = apply_results(state, checks, now)
+    outages, recoveries, cert_warnings = apply_result_tuple = apply_results(state, checks, now)
     send_alerts(outages, recoveries, cert_warnings, args.dry_run)
 
     save_state(state)
