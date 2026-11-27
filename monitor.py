@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/env python3
 """
 Outage monitor.
 
@@ -66,7 +66,6 @@ ALERT_ROLE_ID = _env("ALERT_ROLE_ID")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "Outages")
 DASHBOARD_URL = _env("DASHBOARD_URL")
-MAINTENANCE_MODE = _env("MAINTENANCE_MODE", "false").lower() == "true"
 
 FAILURE_THRESHOLD = max(1, _env_int("FAILURE_THRESHOLD", 2))
 RETRIES = max(0, _env_int("CHECK_RETRIES", 2))
@@ -474,10 +473,9 @@ def apply_results(state, checks, now):
         svc = services.setdefault(check.key, new_service())
         svc.update(name=check.name, kind=check.kind, target=check.target)
 
-        # Trigger maintenance if global MAINTENANCE_MODE is true for websites, or if listed in maintenance.json
-        is_maint = (MAINTENANCE_MODE and check.kind == "website") or (check.key in maint_data)
-        if is_maint:
-            maint_reason = maint_data.get(check.key, "Scheduled website maintenance in progress.")
+        # Check if service is listed in maintenance.json override
+        if check.key in maint_data:
+            maint_reason = maint_data[check.key]
             check.ok = False
             check.detail = f"Under Maintenance: {maint_reason}"
             svc["last"] = {"ok": False, "detail": check.detail, "latency": None, "info": "Maintenance"}
@@ -742,10 +740,10 @@ def write_dashboards(payload, password):
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     (SITE_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
-    # 1. Public dashboard at the root URL (site/index.html)
+    # 1. Public dashboard at root (site/index.html)
     _render_html(payload, "", SITE_DIR / "index.html")
 
-    # 2. Private password-protected dashboard at /admin/ (site/admin/index.html)
+    # 2. Private encrypted dashboard at admin folder (site/admin/index.html)
     if password:
         _render_html(payload, password, SITE_DIR / "admin" / "index.html")
 
