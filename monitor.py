@@ -3,13 +3,8 @@
 Outage monitor.
 
 Checks websites, Minecraft servers and Discord bots, alerts a Discord webhook
-when something goes down or recovers, and builds an encrypted status dashboard
-(site/index.html) that GitHub Pages serves.
-
-Usage:
-    python monitor.py              run all checks (what the workflow does)
-    python monitor.py --dry-run    run checks, print alerts instead of sending them
-    python monitor.py --demo       build a sample dashboard from fake data (password: demo)
+when something goes down or recovers, and builds both a public status dashboard
+(site/index.html) and an encrypted private dashboard (site/admin/index.html).
 """
 
 import argparse
@@ -24,11 +19,10 @@ import secrets
 import socket
 import ssl
 import struct
-import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -42,7 +36,6 @@ import requests
 # --------------------------------------------------------------------------- #
 
 def _env(name, default=""):
-    """Environment lookup that treats an empty string (unset secret/var) as missing."""
     value = os.environ.get(name, "").strip()
     return value if value else default
 
@@ -73,11 +66,9 @@ ALERT_ROLE_ID = _env("ALERT_ROLE_ID")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 DASHBOARD_TITLE = _env("DASHBOARD_TITLE", "Outages")
 DASHBOARD_URL = _env("DASHBOARD_URL")
+MAINTENANCE_MODE = _env("MAINTENANCE_MODE", "false").lower() == "true"
 
-# A service is declared down after this many failed runs in a row (5 minutes apart).
-# 1 alerts on the first failed run; 2 filters out one-off blips.
 FAILURE_THRESHOLD = max(1, _env_int("FAILURE_THRESHOLD", 2))
-# Extra attempts inside a single run before a check counts as failed.
 RETRIES = max(0, _env_int("CHECK_RETRIES", 2))
 RETRY_DELAY = 3
 CERT_WARN_DAYS = _env_int("CERT_WARN_DAYS", 14)
@@ -87,8 +78,8 @@ SITE_DIR = Path(_env("SITE_DIR", "site"))
 TEMPLATE_FILE = Path(__file__).with_name("dashboard.html")
 
 STATE_VERSION = 2
-CHECK_INTERVAL = 300          # seconds between scheduled runs (shown on the dashboard)
-RECENT_MAX = 288              # 24 hours of 5 minute checks
+CHECK_INTERVAL = 300
+RECENT_MAX = 288
 HISTORY_DAYS = 90
 INCIDENTS_MAX = 50
 PBKDF2_ITERATIONS = 600_000
@@ -111,13 +102,13 @@ def log(level, message):
 class Check:
     key: str
     name: str
-    kind: str                       # website | minecraft | bot
-    target: str                     # plain text shown on the dashboard
-    ok: Optional[bool]              # True = up, False = down, None = could not be checked
-    detail: str                     # short status line
+    kind: str
+    target: str
+    ok: Optional[bool]
+    detail: str
     latency_ms: Optional[int] = None
-    info: str = ""                  # extra line for the dashboard
-    mention: str = ""               # Discord mention, used only in alerts
+    info: str = ""
+    mention: str = ""
     cert_days: Optional[int] = None
 
 
@@ -171,7 +162,6 @@ def _http_once(url):
     if code < 400:
         return True, f"HTTP {code}", latency
     if code in (401, 403, 429):
-        # Reachable, but a bot filter (for example Cloudflare) refused the request.
         return True, f"HTTP {code} (bot protection answered)", latency
     return False, f"HTTP {code}", latency
 
@@ -276,8 +266,8 @@ def _mc_ping_once(host, port):
             sock.sendall(_pack_varint(len(handshake)) + handshake)
             sock.sendall(b"\x01\x00")
 
-            _read_varint(sock)                       # packet length
-            if _read_varint(sock) != 0:              # packet id
+            _read_varint(sock)
+            if _read_varint(sock) != 0:
                 raise ValueError("Invalid status packet")
             json_len = _read_varint(sock)
             if json_len > 1_000_000:
@@ -320,8 +310,6 @@ def check_minecraft(key, name, address):
 # --------------------------------------------------------------------------- #
 
 async def check_discord_bots():
-    """Checks bot presence. If the monitor itself cannot connect, bots are reported as
-    unknown (ok=None) instead of down, so a monitor problem never raises a false outage."""
     if not (BOT_TOKEN and TARGET_BOT_IDS and GUILD_ID):
         return []
 
@@ -357,7 +345,7 @@ async def check_discord_bots():
                 await guild.chunk()
             except Exception:
                 pass
-            await asyncio.sleep(2.0)    # give presence updates a moment to arrive
+            await asyncio.sleep(2.0)
 
             for bot_id in TARGET_BOT_IDS:
                 member = guild.get_member(bot_id)
@@ -427,7 +415,6 @@ def load_state():
         raw.setdefault("incidents", [])
         return raw
 
-    # Migrate the old flat format: {"website": null | down_since_timestamp, ...}
     state = empty_state()
     for key, value in (raw or {}).items():
         svc = new_service()
@@ -469,20 +456,47 @@ def record(svc, now, ok, latency):
 
 
 def apply_results(state, checks, now):
-    """Updates state from this run and returns the alerts to send."""
     outages, recoveries, cert_warnings = [], [], []
     services = state["services"]
 
     for stale_key in [k for k in services if k not in {c.key for c in checks}]:
         del services[stale_key]
 
+    maintenance_file = Path("maintenance.json")
+    maint_data = {}
+    if maintenance_file.exists():
+        try:
+            maint_data = json.loads(maintenance_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
     for check in checks:
         svc = services.setdefault(check.key, new_service())
         svc.update(name=check.name, kind=check.kind, target=check.target)
+
+        # Trigger maintenance if global MAINTENANCE_MODE is true for websites, or if listed in maintenance.json
+        is_maint = (MAINTENANCE_MODE and check.kind == "website") or (check.key in maint_data)
+        if is_maint:
+            maint_reason = maint_data.get(check.key, "Scheduled website maintenance in progress.")
+            check.ok = False
+            check.detail = f"Under Maintenance: {maint_reason}"
+            svc["last"] = {"ok": False, "detail": check.detail, "latency": None, "info": "Maintenance"}
+
+            svc["failures"] += 1
+            if svc["down_since"] is None:
+                svc["down_since"] = now
+            if not svc["alerted"]:
+                svc["alerted"] = True
+                state["incidents"].append(
+                    {"key": check.key, "name": check.name, "start": svc["down_since"],
+                     "end": None, "reason": check.detail})
+                outages.append((check, svc["down_since"]))
+            continue
+
         svc["last"] = {"ok": check.ok, "detail": check.detail, "latency": check.latency_ms, "info": check.info}
 
         if check.ok is None:
-            continue                                    # monitor problem, leave history alone
+            continue
 
         record(svc, now, check.ok, check.latency_ms)
 
@@ -529,7 +543,7 @@ def uptime_pct(svc, now, days):
         return None
     pct = up * 100 / total
     if up < total:
-        pct = min(pct, 99.99)           # never round a bad day up to a clean 100
+        pct = min(pct, 99.99)
     return round(pct, 2)
 
 
@@ -690,8 +704,6 @@ def _b64(data):
 
 
 def encrypt_payload(payload, password):
-    """AES-256-GCM with a PBKDF2-SHA256 key. The dashboard decrypts this in the browser
-    with Web Crypto, so nothing readable ships to people who lack the password."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     salt, iv = secrets.token_bytes(16), secrets.token_bytes(12)
@@ -706,84 +718,36 @@ def encrypt_payload(payload, password):
     }
 
 
-def write_dashboard(payload, password):
+def _render_html(payload, password, output_path):
     if not TEMPLATE_FILE.exists():
         raise SystemExit(f"Dashboard template missing: {TEMPLATE_FILE}")
 
     if password:
-        if len(password) < 12:
-            log("WARNING", "DASHBOARD_PASSWORD is short. The data is encrypted, but anyone can "
-                           "download the page and guess offline, so use a long passphrase.")
         try:
             blob = encrypt_payload(payload, password)
         except ImportError:
-            # Never fall back to publishing readable data when a password was requested.
             raise SystemExit("The 'cryptography' package is required to encrypt the dashboard.")
     else:
-        log("WARNING", "DASHBOARD_PASSWORD is not set. The dashboard will be public.")
         blob = {"mode": "plain", "payload": payload}
 
     data = json.dumps(blob, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE_FILE.read_text(encoding="utf-8").replace("__DASHBOARD_DATA__", data)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html, encoding="utf-8")
+    log("INFO", f"Wrote {output_path} ({'encrypted' if password else 'public'}).")
+
+
+def write_dashboards(payload, password):
     SITE_DIR.mkdir(parents=True, exist_ok=True)
-    (SITE_DIR / "index.html").write_text(html, encoding="utf-8")
     (SITE_DIR / ".nojekyll").write_text("", encoding="utf-8")
-    log("INFO", f"Wrote {SITE_DIR / 'index.html'} ({'encrypted' if password else 'public'}).")
 
+    # 1. Public dashboard at the root URL (site/index.html)
+    _render_html(payload, "", SITE_DIR / "index.html")
 
-# --------------------------------------------------------------------------- #
-# Demo data
-# --------------------------------------------------------------------------- #
-
-def build_demo_state(now):
-    rnd = random.Random(7)
-    state = empty_state()
-    specs = [
-        ("website", "Website", "website", "https://discycraft.eu", "up", 180),
-        ("minecraft", "Minecraft server", "minecraft", "play.discycraft.eu", "up", 42),
-        ("bot_1", "Moderation bot", "bot", "ID 100000000000000001", "up", None),
-        ("bot_2", "Giveaway bot", "bot", "ID 100000000000000002", "down", None),
-        ("bot_3", "Music bot", "bot", "ID 100000000000000003", "degraded", None),
-    ]
-    for key, name, kind, target, status, base in specs:
-        svc = new_service()
-        svc.update(name=name, kind=kind, target=target)
-        for i in range(HISTORY_DAYS):
-            ts = now - i * 86400
-            bad = rnd.random() < (0.12 if key != "website" else 0.04)
-            total = 288 if i else 150
-            up = total - (rnd.randint(2, 40) if bad else 0)
-            svc["daily"][utc_day(ts)] = [up, total]
-        for i in range(RECENT_MAX):
-            ts = now - (RECENT_MAX - 1 - i) * 300
-            fail = status != "up" and i > RECENT_MAX - 6
-            lat = None if base is None else max(8, int(base + rnd.gauss(0, base * 0.18)
-                                                        + (base * 1.4 if rnd.random() < 0.03 else 0)))
-            svc["recent"].append([ts, 0 if fail else 1, None if fail else lat])
-        ok = status == "up"
-        svc["last"] = {
-            "ok": ok,
-            "detail": {"website": "HTTP 200", "minecraft": "7 of 50 players online"}.get(key, "Online (online)")
-            if ok else "Offline",
-            "latency": svc["recent"][-1][2] if ok else None,
-            "info": {"website": "Certificate expires in 61 days", "minecraft": "Version Paper 1.21.11"}.get(key, ""),
-        }
-        if status == "down":
-            svc.update(down_since=now - 5400, failures=18, alerted=True)
-            state["incidents"].append({"key": key, "name": name, "start": now - 5400, "end": None,
-                                       "reason": "Offline"})
-        elif status == "degraded":
-            svc.update(down_since=now - 320, failures=1)
-        state["services"][key] = svc
-    state["incidents"] += [
-        {"key": "minecraft", "name": "Minecraft server", "start": now - 3 * 86400 - 4000,
-         "end": now - 3 * 86400 - 2200, "reason": "No response (TimeoutError)"},
-        {"key": "website", "name": "Website", "start": now - 9 * 86400,
-         "end": now - 9 * 86400 + 640, "reason": "HTTP 503"},
-    ]
-    state["incidents"].sort(key=lambda i: i["start"])
-    return state
+    # 2. Private password-protected dashboard at /admin/ (site/admin/index.html)
+    if password:
+        _render_html(payload, password, SITE_DIR / "admin" / "index.html")
 
 
 # --------------------------------------------------------------------------- #
@@ -811,12 +775,6 @@ async def collect_checks():
 async def main(args):
     now = int(time.time())
 
-    if args.demo:
-        state = build_demo_state(now)
-        write_dashboard(build_payload(state, now), "demo")
-        log("INFO", "Demo dashboard built. Password: demo")
-        return
-
     state = load_state()
     checks = await collect_checks()
     for c in checks:
@@ -827,11 +785,10 @@ async def main(args):
     send_alerts(outages, recoveries, cert_warnings, args.dry_run)
 
     save_state(state)
-    write_dashboard(build_payload(state, now), DASHBOARD_PASSWORD)
+    write_dashboards(build_payload(state, now), DASHBOARD_PASSWORD)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print alerts instead of sending them")
-    parser.add_argument("--demo", action="store_true", help="build a sample dashboard from fake data")
     asyncio.run(main(parser.parse_args()))
