@@ -442,7 +442,7 @@
     $("#services").innerHTML = data.services.map(service).join("");
     $("#incidents").innerHTML = incidents();
     
-    // Dynamically generate checkboxes for all configured services
+    // Dynamically generate checkboxes for all real service keys (e.g. website_0, minecraft_0)
     const checkboxesHtml = data.services.map(s => 
       `<label><input type="checkbox" name="maint-svc" value="${esc(s.key)}"> ${esc(s.name)}</label>`
     ).join("");
@@ -451,12 +451,12 @@
       <div class="admin-panel">
         <div class="admin-card">
           <h3>🛠️ Quick Maintenance Control</h3>
-          <p>Select services to place into maintenance mode immediately:</p>
+          <p>Select services to place into maintenance mode immediately (unchecking a service leaves others untouched):</p>
           <div class="admin-checkboxes">${checkboxesHtml}</div>
           <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)">
           <div class="admin-actions">
             <button class="admin-btn" onclick="submitMaintenance()">Apply Maintenance</button>
-            <button class="admin-btn danger" onclick="clearMaintenance()">Clear All</button>
+            <button class="admin-btn danger" onclick="clearAllMaintenance()">Clear All</button>
             <span id="maint-status"></span>
           </div>
         </div>
@@ -526,22 +526,22 @@
   });
   $("#lock-btn").addEventListener("click", lock);
 
-  // ---------- Secure Maintenance API Actions ----------
+  // ---------- Maintenance API Actions with Selective Toggling ----------
   window.submitMaintenance = async function() {
     const statusEl = $("#maint-status");
-    const checkboxes = document.querySelectorAll('input[name="maint-svc"]:checked');
-    if (!checkboxes.length) {
-      statusEl.style.color = "var(--warn)";
-      statusEl.textContent = "Select at least one service.";
-      return;
-    }
-
     statusEl.textContent = "Updating...";
     statusEl.style.color = "var(--muted)";
     
     const reason = $("#maint-reason").value || "Under maintenance";
+    const checkboxes = document.querySelectorAll('input[name="maint-svc"]');
+    
+    // Build update object based on active checkboxes
     let payload = {};
-    checkboxes.forEach(cb => { payload[cb.value] = reason; });
+    checkboxes.forEach(cb => {
+      if (cb.checked) {
+        payload[cb.value] = reason;
+      }
+    });
 
     try {
       const response = await fetch(WORKER_ENDPOINT, {
@@ -555,19 +555,19 @@
 
       if (response.ok) {
         statusEl.style.color = "var(--up)";
-        statusEl.textContent = "✅ Triggered! GitHub will update in ~45s.";
+        statusEl.textContent = "✅ Updated! GitHub will sync in ~45s.";
       } else {
         throw new Error(`HTTP ${response.status}`);
       }
     } catch (err) {
       statusEl.style.color = "var(--down)";
-      statusEl.textContent = "❌ Error triggering update.";
+      statusEl.textContent = "❌ Error updating maintenance.";
     }
   };
 
-  window.clearMaintenance = async function() {
+  window.clearAllMaintenance = async function() {
     const statusEl = $("#maint-status");
-    statusEl.textContent = "Clearing...";
+    statusEl.textContent = "Clearing all...";
     statusEl.style.color = "var(--muted)";
     try {
       const response = await fetch(WORKER_ENDPOINT, {
@@ -581,7 +581,8 @@
 
       if (response.ok) {
         statusEl.style.color = "var(--up)";
-        statusEl.textContent = "✅ Maintenance cleared!";
+        statusEl.textContent = "✅ All maintenance cleared!";
+        document.querySelectorAll('input[name="maint-svc"]').forEach(cb => cb.checked = false);
       } else {
         throw new Error(`HTTP ${response.status}`);
       }
