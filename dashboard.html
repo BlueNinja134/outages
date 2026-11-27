@@ -200,19 +200,6 @@
   .admin-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
   .admin-card h3 { margin: 0 0 6px; font-size: 1.125rem; font-weight: 600; }
   .admin-card p { margin: 0 0 16px; color: var(--muted); font-size: .95rem; }
-  .admin-checkboxes { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
-  .admin-checkboxes label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: .95rem; font-weight: 500; }
-  .admin-card input[type="text"] {
-    width: 100%;
-    padding: 12px 14px;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    margin-bottom: 16px;
-    box-sizing: border-box;
-  }
   .admin-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .admin-btn {
     padding: 10px 16px;
@@ -319,7 +306,7 @@
     minecraft: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/>',
     bot: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4M9 13h.01M15 13h.01M9 16.5h6"/>',
   };
-  const LABEL = { up: "Operational", down: "Down", degraded: "Failing checks", unknown: "Unknown" };
+  const LABEL = { up: "Operational", down: "Down", degraded: "Maintenance", unknown: "Unknown" };
 
   function strip(s) {
     const end = Date.parse(data.days_end + "T00:00:00Z");
@@ -358,7 +345,7 @@
   function service(s) {
     let line = esc(s.detail);
     if (s.status === "down" && s.down_since) line += `<span class="muted">, down for ${dur(nowSec() - s.down_since)}</span>`;
-    if (s.status === "degraded") line += `<span class="muted">, waiting for the next check to confirm</span>`;
+    if (s.status === "degraded") line += `<span class="muted">, under scheduled maintenance</span>`;
     if (s.info) line += `<span class="muted">. ${esc(s.info)}</span>`;
     return `
       <article class="svc s-${esc(s.status)}">
@@ -406,8 +393,8 @@
       sub = `Down: ${names(down)}.`;
     } else if (deg.length) {
       cls = "warn";
-      title = deg.length === 1 ? `${deg[0].name} is failing checks` : `${deg.length} services are failing checks`;
-      sub = `An outage is declared after ${data.threshold} failed checks in a row, so no alert has gone out yet.`;
+      title = deg.length === 1 ? `${deg[0].name} is under maintenance` : `${deg.length} services are under maintenance`;
+      sub = `Scheduled maintenance active for: ${names(deg)}.`;
     } else {
       cls = "up";
       title = unk.length ? "Everything checked is operational" : "All systems operational";
@@ -442,18 +429,22 @@
     $("#services").innerHTML = data.services.map(service).join("");
     $("#incidents").innerHTML = incidents();
     
-    // Dynamically generate checkboxes for all real service keys (e.g. website_0, minecraft_0)
-    const checkboxesHtml = data.services.map(s => 
-      `<label><input type="checkbox" name="maint-svc" value="${esc(s.key)}"> ${esc(s.name)}</label>`
-    ).join("");
+    // Per-service checkboxes and individual reason inputs
+    const checkboxesHtml = data.services.map(s => `
+      <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: .95rem; font-weight: 500; min-width: 160px;">
+          <input type="checkbox" name="maint-svc" value="${esc(s.key)}" onchange="toggleReasonInput(this)"> ${esc(s.name)}
+        </label>
+        <input type="text" id="reason-${esc(s.key)}" placeholder="Reason (e.g., Update & reboot)" disabled style="flex: 1; min-width: 220px; padding: 8px 12px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; opacity: 0.5;">
+      </div>
+    `).join("");
 
     $("#admin-container").innerHTML = isAdmin ? `
       <div class="admin-panel">
         <div class="admin-card">
           <h3>🛠️ Quick Maintenance Control</h3>
-          <p>Select services to place into maintenance mode immediately (unchecking a service leaves others untouched):</p>
-          <div class="admin-checkboxes">${checkboxesHtml}</div>
-          <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)">
+          <p>Select services and specify individual maintenance reasons:</p>
+          <div style="margin-bottom: 16px;">${checkboxesHtml}</div>
           <div class="admin-actions">
             <button class="admin-btn" onclick="submitMaintenance()">Apply Maintenance</button>
             <button class="admin-btn danger" onclick="clearAllMaintenance()">Clear All</button>
@@ -526,21 +517,29 @@
   });
   $("#lock-btn").addEventListener("click", lock);
 
-  // ---------- Maintenance API Actions with Selective Toggling ----------
+  // ---------- Maintenance API Actions ----------
+  window.toggleReasonInput = function(checkbox) {
+    const input = document.getElementById(`reason-${checkbox.value}`);
+    input.disabled = !checkbox.checked;
+    input.style.opacity = checkbox.checked ? "1" : "0.5";
+  };
+
   window.submitMaintenance = async function() {
     const statusEl = $("#maint-status");
+    const checkboxes = document.querySelectorAll('input[name="maint-svc"]:checked');
+    if (!checkboxes.length) {
+      statusEl.style.color = "var(--warn)";
+      statusEl.textContent = "Select at least one service.";
+      return;
+    }
+
     statusEl.textContent = "Updating...";
     statusEl.style.color = "var(--muted)";
     
-    const reason = $("#maint-reason").value || "Under maintenance";
-    const checkboxes = document.querySelectorAll('input[name="maint-svc"]');
-    
-    // Build update object based on active checkboxes
     let payload = {};
     checkboxes.forEach(cb => {
-      if (cb.checked) {
-        payload[cb.value] = reason;
-      }
+      const reasonInput = document.getElementById(`reason-${cb.value}`);
+      payload[cb.value] = reasonInput.value.trim() || "Under maintenance";
     });
 
     try {
@@ -582,7 +581,10 @@
       if (response.ok) {
         statusEl.style.color = "var(--up)";
         statusEl.textContent = "✅ All maintenance cleared!";
-        document.querySelectorAll('input[name="maint-svc"]').forEach(cb => cb.checked = false);
+        document.querySelectorAll('input[name="maint-svc"]').forEach(cb => {
+          cb.checked = false;
+          toggleReasonInput(cb);
+        });
       } else {
         throw new Error(`HTTP ${response.status}`);
       }
