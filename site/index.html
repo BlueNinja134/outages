@@ -1,486 +1,77 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<meta name="color-scheme" content="dark light">
-<title>Status</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #14181b;
-    --surface: #1b2125;
-    --line: #2a3238;
-    --text: #e3e9ec;
-    --muted: #8c99a1;
-    --up: #69b878;
-    --warn: #e3b04b;
-    --down: #e5594f;
-    --none: #252d33;
-    --accent: #6f9cf5;
-    --on-accent: #0c1220;
-  }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f3f5f6;
-      --surface: #ffffff;
-      --line: #dbe1e5;
-      --text: #161b1e;
-      --muted: #5d6a72;
-      --up: #2b8443;
-      --warn: #9a6a05;
-      --down: #c2362d;
-      --none: #e4e9ec;
-      --accent: #2d5fd1;
-      --on-accent: #ffffff;
-    }
-  }
+<!-- Maintenance Control Panel (Only visible on admin page) -->
+<div id="admin-maintenance-panel" style="display:none; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+    <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
+    <p style="color: #8b949e; font-size: 13px;">Select services to place into maintenance mode immediately:</p>
+    
+    <div id="maint-checkboxes" style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 12px;">
+        <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
+        <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
+    </div>
 
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 400 16px/1.5 "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-variant-numeric: tabular-nums;
-    -webkit-font-smoothing: antialiased;
-  }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  /* Lock screen. The data below is encrypted, so nothing sits behind this. */
-  .lock {
-    min-height: 100vh;
-    min-height: 100dvh;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--bg);
-  }
-  .lock form { width: 100%; max-width: 360px; }
-  .lock h1 { font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; margin: 0 0 8px; }
-  .lock p { margin: 0 0 24px; color: var(--muted); }
-  .lock label { display: block; font-weight: 500; font-size: .9rem; margin-bottom: 6px; }
-  .lock input {
-    width: 100%;
-    padding: 12px 14px;
-    font: inherit;
-    color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-  }
-  .lock input[aria-invalid="true"] { border-color: var(--down); }
-  .lock button {
-    width: 100%;
-    margin-top: 14px;
-    padding: 12px 14px;
-    font: inherit;
-    font-weight: 600;
-    color: var(--on-accent);
-    background: var(--accent);
-    border: 0;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .lock button:disabled { opacity: .6; cursor: progress; }
-  .lock .error { margin: 10px 0 0; min-height: 1.5em; font-size: .9rem; color: var(--down); }
-
-  /* Dashboard */
-  main { max-width: 860px; margin: 0 auto; padding: 28px 20px 72px; }
-  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 56px; }
-  .brand { font-weight: 600; color: var(--muted); }
-  .ghost {
-    font: inherit;
-    font-size: .9rem;
-    font-weight: 500;
-    color: var(--muted);
-    background: none;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 14px;
-    cursor: pointer;
-  }
-  .ghost:hover { color: var(--text); border-color: var(--muted); }
-
-  .hero { display: grid; grid-template-columns: 6px 1fr; gap: 20px; margin-bottom: 32px; }
-  .hero .bar { border-radius: 3px; background: var(--c); }
-  .hero h1 {
-    margin: 0 0 12px;
-    font-size: clamp(2rem, 5.5vw, 3.4rem);
-    line-height: 1.08;
-    letter-spacing: -0.025em;
-    font-weight: 600;
-  }
-  .hero p { margin: 0; color: var(--muted); max-width: 62ch; }
-  .hero.s-up { --c: var(--up); }
-  .hero.s-warn { --c: var(--warn); }
-  .hero.s-down { --c: var(--down); }
-  .hero.s-none { --c: var(--none); }
-
-  .notice {
-    margin: 0 0 32px;
-    padding: 12px 16px;
-    border: 1px solid var(--warn);
-    border-radius: 8px;
-    color: var(--text);
-    font-size: .95rem;
-  }
-
-  .svc { padding: 26px 0; border-top: 1px solid var(--line); }
-  .svc:last-child { border-bottom: 1px solid var(--line); }
-  .svc.s-up { --c: var(--up); }
-  .svc.s-degraded { --c: var(--warn); }
-  .svc.s-down { --c: var(--down); }
-  .svc.s-unknown { --c: var(--muted); }
-
-  .svc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-  .ident { display: flex; gap: 12px; min-width: 0; }
-  .ident svg {
-    flex: none; width: 22px; height: 22px; margin-top: 3px;
-    fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
-  }
-  .name { margin: 0; font-size: 1.125rem; line-height: 1.35; font-weight: 600; }
-  .target { margin: 2px 0 0; color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
-
-  .pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: .9rem; font-weight: 600; white-space: nowrap; color: var(--c);
-  }
-  .pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
-  .svc.s-down .pill::before { animation: ring 2s ease-out infinite; }
-  @keyframes ring {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--down) 55%, transparent); }
-    80%, 100% { box-shadow: 0 0 0 9px transparent; }
-  }
-
-  .status-line { margin: 14px 0 0; font-size: .95rem; }
-  .status-line .muted { color: var(--muted); }
-
-  .strip {
-    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px;
-    height: 34px; margin: 16px 0 8px;
-  }
-  .seg { border-radius: 2px; background: var(--none); }
-  .seg.up { background: var(--up); }
-  .seg.warn { background: var(--warn); }
-  .seg.down { background: var(--down); }
-  .strip-axis { display: flex; justify-content: space-between; font-size: .8rem; color: var(--muted); }
-
-  .stats-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; margin-top: 18px; }
-  .stats { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 0; }
-  .stats div { min-width: 0; }
-  .stats dt { font-size: .8rem; color: var(--muted); }
-  .stats dd { margin: 0; font-size: 1.05rem; font-weight: 600; }
-  .spark { width: 200px; max-width: 100%; height: 36px; display: block; }
-  .spark path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-  .spark line { stroke: var(--down); stroke-width: 1.5; }
-
-  .section-title { margin: 56px 0 8px; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
-  .empty { margin: 0; color: var(--muted); }
-  .inc { list-style: none; margin: 0; padding: 0; }
-  .inc li {
-    display: grid; grid-template-columns: 180px 1fr auto; gap: 8px 20px;
-    padding: 14px 0; border-top: 1px solid var(--line);
-  }
-  .inc li:last-child { border-bottom: 1px solid var(--line); }
-  .inc .when { color: var(--muted); font-size: .9rem; }
-  .inc .what strong { font-weight: 600; }
-  .inc .what span { display: block; color: var(--muted); font-size: .9rem; }
-  .inc .len { font-weight: 600; }
-  .inc .len.ongoing { color: var(--down); }
-
-  footer { margin-top: 56px; color: var(--muted); font-size: .85rem; max-width: 62ch; }
-
-  @media (max-width: 600px) {
-    .top { margin-bottom: 36px; }
-    .hero { grid-template-columns: 5px 1fr; gap: 16px; }
-    .svc-head { flex-direction: column; gap: 10px; }
-    .inc li { grid-template-columns: 1fr auto; }
-    .inc .when { grid-column: 1 / -1; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .svc.s-down .pill::before { animation: none; }
-  }
-</style>
-</head>
-<body>
-
-<div id="lock" class="lock" hidden>
-  <form id="lock-form" autocomplete="off">
-    <h1>Dashboard locked</h1>
-    <p>Enter the password to decrypt the status data.</p>
-    <label for="pw">Password</label>
-    <input id="pw" type="password" autocomplete="current-password" required>
-    <p id="lock-error" class="error" role="alert"></p>
-    <button id="unlock" type="submit">Unlock</button>
-  </form>
+    <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 8px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; margin-bottom: 12px; box-sizing: border-box;">
+    
+    <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
+    <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px;">Clear All</button>
+    <span id="maint-status" style="margin-left: 12px; font-size: 13px;"></span>
 </div>
 
-<main id="app" hidden>
-  <div class="top">
-    <span class="brand" id="brand"></span>
-    <button class="ghost" id="lock-btn" type="button" hidden>Lock</button>
-  </div>
-  <section id="hero"></section>
-  <div id="stale"></div>
-  <section id="services" aria-label="Services"></section>
-  <h2 class="section-title">Incident history</h2>
-  <div id="incidents"></div>
-  <footer id="foot"></footer>
-</main>
-
-<noscript><p style="padding:24px">This page needs JavaScript to decrypt and show the status data.</p></noscript>
-
-<script type="application/json" id="dashboard-data">{"mode":"plain","payload":{"title":"Outages","generated":1795805714,"interval":300,"threshold":2,"days_end":"2026-11-27","services":[{"key":"website","name":"Website","kind":"website","target":"https://discycrafteu.falix.org","status":"down","detail":"HTTP 503","info":"","latency":446,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,11]],"recent":[[1795803334,0,1358],[1795803622,0,506],[1795803921,0,322],[1795804517,0,441],[1795804598,0,437],[1795804767,0,507],[1795804817,0,428],[1795805119,0,428],[1795805419,0,309],[1795805466,0,520],[1795805714,0,446]]},{"key":"minecraft","name":"Minecraft server","kind":"minecraft","target":"piglin.hostify.cz:57390","status":"up","detail":"0 of 50 players online","info":"Version \u00a74Maintenance","latency":1593,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[12,12]],"recent":[[1795803334,1,1292],[1795803622,1,1490],[1795803921,1,1442],[1795804517,1,1694],[1795804598,1,1512],[1795804767,1,1520],[1795804817,1,1606],[1795804982,1,1691],[1795805119,1,1535],[1795805419,1,1424],[1795805466,1,1516],[1795805714,1,1593]]},{"key":"bot_1376227676292907150","name":"DiscyCraft.eu","kind":"bot","target":"ID 1376227676292907150","status":"up","detail":"Online (online)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[12,12]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null]]},{"key":"bot_1514298483111231538","name":"Minecraft Connect","kind":"bot","target":"ID 1514298483111231538","status":"up","detail":"Online (dnd)","info":"","latency":null,"down_since":null,"uptime":{"24h":100.0,"7d":100.0,"30d":100.0,"90d":100.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[12,12]],"recent":[[1795803334,1,null],[1795803622,1,null],[1795803921,1,null],[1795804517,1,null],[1795804598,1,null],[1795804767,1,null],[1795804817,1,null],[1795804982,1,null],[1795805119,1,null],[1795805419,1,null],[1795805466,1,null],[1795805714,1,null]]},{"key":"bot_1530668103820906656","name":"Web Connect","kind":"bot","target":"ID 1530668103820906656","status":"down","detail":"Offline","info":"","latency":null,"down_since":1795803334,"uptime":{"24h":0.0,"7d":0.0,"30d":0.0,"90d":0.0},"days":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[0,12]],"recent":[[1795803334,0,null],[1795803622,0,null],[1795803921,0,null],[1795804517,0,null],[1795804598,0,null],[1795804767,0,null],[1795804817,0,null],[1795804982,0,null],[1795805119,0,null],[1795805419,0,null],[1795805466,0,null],[1795805714,0,null]]}],"incidents":[{"name":"Web Connect","start":1795803334,"end":null,"reason":"Offline"},{"name":"Website","start":1795803334,"end":null,"reason":"HTTP 503"}]}}</script>
 <script>
-(() => {
-  const $ = (s) => document.querySelector(s);
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const PW_KEY = "watchdog-pw";
-
-  let blob = JSON.parse($("#dashboard-data").textContent);
-  let password = null;
-  let data = null;
-  let timers = [];
-
-  // ---------- crypto ----------
-  const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-  async function decrypt(b, pw) {
-    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
-    const key = await crypto.subtle.deriveKey(
-      { name: "PBKDF2", salt: unb64(b.salt), iterations: b.iter, hash: "SHA-256" },
-      base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(b.iv) }, key, unb64(b.ct));
-    return JSON.parse(new TextDecoder().decode(plain));
-  }
-
-  // ---------- formatting ----------
-  const nowSec = () => Math.floor(Date.now() / 1000);
-  function dur(sec) {
-    sec = Math.max(0, Math.floor(sec));
-    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
-    if (d) return `${d}d ${h}h`;
-    if (h) return `${h}h ${m}m`;
-    if (m) return `${m}m`;
-    return `${sec}s`;
-  }
-  function ago(ts) {
-    const s = nowSec() - ts;
-    if (s < 60) return "just now";
-    return `${dur(s)} ago`;
-  }
-  const when = (ts) => new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-  const pct = (v) => (v == null ? "No data" : `${v}%`);
-
-  const ICONS = {
-    website: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>',
-    minecraft: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/>',
-    bot: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4M9 13h.01M15 13h.01M9 16.5h6"/>',
-  };
-  const LABEL = { up: "Operational", down: "Down", degraded: "Failing checks", unknown: "Unknown" };
-
-  // ---------- pieces ----------
-  function strip(s) {
-    const end = Date.parse(data.days_end + "T00:00:00Z");
-    const n = s.days.length;
-    return s.days.map((d, i) => {
-      const label = new Date(end - (n - 1 - i) * 864e5)
-        .toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
-      if (!d) return `<span class="seg" title="${label}: no data"></span>`;
-      const ratio = d[0] / d[1];
-      const cls = ratio >= 0.999 ? "up" : ratio >= 0.95 ? "warn" : "down";
-      return `<span class="seg ${cls}" title="${label}: ${(ratio * 100).toFixed(2)}% uptime from ${d[1]} checks"></span>`;
-    }).join("");
-  }
-
-  function spark(recent) {
-    const lat = recent.filter((p) => p[1] && p[2] != null).map((p) => p[2]);
-    if (recent.length < 2 || !lat.length) return "";
-    const W = 200, H = 36, n = recent.length;
-    const lo = Math.min(...lat), hi = Math.max(...lat), span = hi - lo || 1;
-    let path = "", pen = false, fails = "";
-    recent.forEach((p, i) => {
-      const x = (i / (n - 1)) * W;
-      if (p[1] && p[2] != null) {
-        const y = H - 3 - ((p[2] - lo) / span) * (H - 8);
-        path += `${pen ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
-        pen = true;
-      } else {
-        pen = false;
-        fails += `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="2" y2="${H - 2}"/>`;
-      }
+    // Automatically show this panel once the admin dashboard is successfully unlocked with your password
+    document.addEventListener("DOMContentLoaded", () => {
+        const checkAdminInterval = setInterval(() => {
+            // Check if the dashboard has decrypted and loaded admin elements
+            if (window.location.pathname.includes("/admin/") || document.body.innerText.includes("Logout") || window.isAdminUnlocked) {
+                const panel = document.getElementById("admin-maintenance-panel");
+                if (panel) panel.style.display = "block";
+                clearInterval(checkAdminInterval);
+            }
+        }, 500);
     });
-    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
-      aria-label="Response time over the last 24 hours, from ${lo} to ${hi} milliseconds">${fails}<path d="${path}"/></svg>`;
-  }
 
-  function service(s) {
-    let line = esc(s.detail);
-    if (s.status === "down" && s.down_since) line += `<span class="muted">, down for ${dur(nowSec() - s.down_since)}</span>`;
-    if (s.status === "degraded") line += `<span class="muted">, waiting for the next check to confirm</span>`;
-    if (s.info) line += `<span class="muted">. ${esc(s.info)}</span>`;
-    return `
-      <article class="svc s-${esc(s.status)}">
-        <div class="svc-head">
-          <div class="ident">
-            <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[s.kind] || ICONS.website}</svg>
-            <div>
-              <h2 class="name">${esc(s.name)}</h2>
-              <p class="target">${esc(s.target)}</p>
-            </div>
-          </div>
-          <span class="pill">${LABEL[s.status] || "Unknown"}</span>
-        </div>
-        <p class="status-line">${line}</p>
-        <div class="strip" role="img" aria-label="${esc(s.name)} uptime over ${s.days.length} days: ${pct(s.uptime["90d"])}">${strip(s)}</div>
-        <div class="strip-axis"><span>${s.days.length} days ago</span><span>Today</span></div>
-        <div class="stats-row">
-          <dl class="stats">
-            <div><dt>Last 24 hours</dt><dd>${pct(s.uptime["24h"])}</dd></div>
-            <div><dt>7 days</dt><dd>${pct(s.uptime["7d"])}</dd></div>
-            <div><dt>30 days</dt><dd>${pct(s.uptime["30d"])}</dd></div>
-            <div><dt>90 days</dt><dd>${pct(s.uptime["90d"])}</dd></div>
-            ${s.latency != null ? `<div><dt>Response time</dt><dd>${s.latency} ms</dd></div>` : ""}
-          </dl>
-          ${spark(s.recent)}
-        </div>
-      </article>`;
-  }
+    async function submitMaintenance() {
+        const statusEl = document.getElementById("maint-status");
+        statusEl.innerText = "Updating...";
+        
+        const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
+        const reason = document.getElementById("maint-reason").value || "Under maintenance";
+        
+        let payload = {};
+        checkboxes.forEach(cb => {
+            payload[cb.value] = reason;
+        });
 
-  function hero() {
-    const list = data.services;
-    const down = list.filter((s) => s.status === "down");
-    const deg = list.filter((s) => s.status === "degraded");
-    const unk = list.filter((s) => s.status === "unknown");
-    const names = (a) => a.map((s) => s.name).join(", ");
-    let cls, title, sub;
+        try {
+            // Replace with your actual Cloudflare Worker URL and Secret Key
+            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
+            const response = await fetch(workerUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
 
-    if (!list.length) {
-      cls = "none"; title = "No services configured";
-      sub = "Add a website, Minecraft server or bot ID in the repository secrets.";
-    } else if (down.length) {
-      cls = "down";
-      title = down.length === list.length && list.length > 1 ? "Everything is down"
-        : down.length === 1 ? `${down[0].name} is down` : `${down.length} of ${list.length} services are down`;
-      sub = `Down: ${names(down)}.`;
-    } else if (deg.length) {
-      cls = "warn";
-      title = deg.length === 1 ? `${deg[0].name} is failing checks` : `${deg.length} services are failing checks`;
-      sub = `An outage is declared after ${data.threshold} failed checks in a row, so no alert has gone out yet.`;
-    } else {
-      cls = "up";
-      title = unk.length ? "Everything checked is operational" : "All systems operational";
-      const withLat = list.filter((s) => s.latency != null);
-      const avg = withLat.length ? Math.round(withLat.reduce((a, s) => a + s.latency, 0) / withLat.length) : null;
-      sub = `${list.length - unk.length} of ${list.length} services up` +
-        (avg != null ? `, average response ${avg} ms` : "") +
-        (unk.length ? `. ${names(unk)} could not be checked.` : ".");
+            if (response.ok) {
+                statusEl.style.color = "#57F287";
+                statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
+            } else {
+                throw new Error("Failed to trigger worker");
+            }
+        } catch (err) {
+            statusEl.style.color = "#ED4245";
+            statusEl.innerText = "❌ Error triggering update.";
+        }
     }
-    sub += ` Last checked ${ago(data.generated)}.`;
-    return `<div class="hero s-${cls}"><div class="bar"></div><div><h1>${esc(title)}</h1><p>${esc(sub)}</p></div></div>`;
-  }
 
-  function incidents() {
-    if (!data.incidents.length) return '<p class="empty">No incidents recorded yet.</p>';
-    return `<ol class="inc">${data.incidents.map((i) => `
-      <li>
-        <div class="when">${esc(when(i.start))}</div>
-        <div class="what"><strong>${esc(i.name)}</strong><span>${esc(i.reason)}</span></div>
-        <div class="len ${i.end ? "" : "ongoing"}">${i.end ? esc(dur(i.end - i.start)) : "Ongoing"}</div>
-      </li>`).join("")}</ol>`;
-  }
-
-  function render() {
-    if (!data) return;
-    document.title = `${data.title} status`;
-    $("#brand").textContent = data.title;
-    $("#hero").innerHTML = hero();
-    const age = nowSec() - data.generated;
-    $("#stale").innerHTML = age > data.interval * 3
-      ? `<p class="notice" role="status">The last check ran ${esc(ago(data.generated))}. Scheduled runs can be delayed, so the statuses below may be out of date.</p>` : "";
-    $("#services").innerHTML = data.services.map(service).join("");
-    $("#incidents").innerHTML = incidents();
-    $("#foot").textContent =
-      `Checks run from GitHub Actions about every ${Math.round(data.interval / 60)} minutes. Times are shown in your local time zone. ` +
-      `Uptime counts every failed check, including ones that did not trigger an alert.`;
-  }
-
-  // ---------- flow ----------
-  function show(view) {
-    $("#lock").hidden = view !== "lock";
-    $("#app").hidden = view !== "app";
-    if (view === "lock") setTimeout(() => $("#pw").focus(), 0);
-  }
-
-  function start(payload) {
-    data = payload;
-    $("#lock-btn").hidden = blob.mode !== "encrypted";
-    render();
-    show("app");
-    timers.forEach(clearInterval);
-    timers = [setInterval(render, 30000), setInterval(refetch, 60000)];
-  }
-
-  function lock() {
-    timers.forEach(clearInterval);
-    timers = [];
-    data = null; password = null;
-    sessionStorage.removeItem(PW_KEY);
-    for (const id of ["#hero", "#stale", "#services", "#incidents", "#foot"]) $(id).innerHTML = "";
-    $("#pw").value = "";
-    show("lock");
-  }
-
-  async function refetch() {
-    try {
-      const res = await fetch(location.pathname + "?t=" + Date.now(), { cache: "no-store" });
-      const m = (await res.text()).match(/<script type="application\/json" id="dashboard-data">([\s\S]*?)<\/script>/);
-      if (!m) return;
-      const next = JSON.parse(m[1]);
-      const payload = next.mode === "encrypted" ? await decrypt(next, password) : next.payload;
-      if (payload.generated !== data.generated) { blob = next; data = payload; render(); }
-    } catch (_) { /* offline or file:// preview, keep what is on screen */ }
-  }
-
-  $("#lock-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = $("#unlock"), input = $("#pw"), err = $("#lock-error");
-    btn.disabled = true; btn.textContent = "Unlocking"; err.textContent = "";
-    input.removeAttribute("aria-invalid");
-    try {
-      const payload = await decrypt(blob, input.value);
-      password = input.value;
-      sessionStorage.setItem(PW_KEY, password);
-      input.value = "";
-      start(payload);
-    } catch (_) {
-      input.setAttribute("aria-invalid", "true");
-      err.textContent = "Wrong password. Check it and try again.";
-      input.select();
-    } finally {
-      btn.disabled = false; btn.textContent = "Unlock";
+    async function clearMaintenance() {
+        const statusEl = document.getElementById("maint-status");
+        statusEl.innerText = "Clearing...";
+        try {
+            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
+            await fetch(workerUrl);
+            statusEl.style.color = "#57F287";
+            statusEl.innerText = "✅ Maintenance cleared!";
+        } catch (e) {
+            statusEl.style.color = "#ED4245";
+            statusEl.innerText = "❌ Failed to clear.";
+        }
     }
-  });
-  $("#lock-btn").addEventListener("click", lock);
-
-  (async () => {
-    if (blob.mode !== "encrypted") return start(blob.payload);
-    const saved = sessionStorage.getItem(PW_KEY);
-    if (saved) {
-      try { password = saved; return start(await decrypt(blob, saved)); }
-      catch (_) { sessionStorage.removeItem(PW_KEY); password = null; }
-    }
-    show("lock");
-  })();
-})();
 </script>
-</body>
-</html>
