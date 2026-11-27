@@ -1,66 +1,100 @@
-<script>
-    const adminCheckInterval = setInterval(() => {
-        const isEncryptedAdminPath = window.location.pathname.includes("/admin/");
-        const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Status Dashboard</title>
+    <!-- Your existing styles and head contents -->
+</head>
+<body>
+    <!-- Your main dashboard content rendered by your template engine -->
+    <div id="app"></div>
 
-        if (isEncryptedAdminPath && isUnlocked && !document.getElementById("admin-maintenance-box")) {
-            clearInterval(adminCheckInterval);
-            const box = document.createElement("div");
-            box.id = "admin-maintenance-box";
-            box.style.cssText = "max-width: 900px; margin: 40px auto 20px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9;";
-            box.innerHTML = `
-                <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
-                <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
-                <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
-                    <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
-                </div>
-                <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
-                    <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
-                    <span id="maint-status" style="font-size: 13px;"></span>
-                </div>
-            `;
-            document.body.appendChild(box);
+    <!-- Maintenance Panel (Hidden by default, shown only when admin is unlocked) -->
+    <div id="admin-maintenance-card" style="display: none; max-width: 900px; margin: 40px auto; padding: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <h3 style="margin-top: 0; color: #f0f6fc; font-size: 16px;">🛠️ Quick Maintenance Control</h3>
+        <p style="color: #8b949e; font-size: 13px; margin-bottom: 12px;">Select services to place into maintenance mode immediately:</p>
+        
+        <div id="maint-checkboxes" style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px;">
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="website"> Website</label>
+            <label style="color: #c9d1d9; cursor: pointer;"><input type="checkbox" value="minecraft"> Minecraft</label>
+        </div>
+
+        <input type="text" id="maint-reason" placeholder="Reason (e.g., Scheduled update)" style="width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; margin-bottom: 15px; box-sizing: border-box;">
+        
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button onclick="submitMaintenance()" style="background: #238636; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Apply Maintenance</button>
+            <button onclick="clearMaintenance()" style="background: #da3633; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer;">Clear All</button>
+            <span id="maint-status" style="font-size: 13px;"></span>
+        </div>
+    </div>
+
+    <!-- Dashboard Data Payload -->
+    <script>
+        window.DASHBOARD_DATA = __DASHBOARD_DATA__;
+    </script>
+
+    <!-- Safe Admin Detection & API Scripts -->
+    <script>
+        // Reveal maintenance card only if on /admin/ and unlocked
+        window.addEventListener("DOMContentLoaded", () => {
+            const checkUnlock = setInterval(() => {
+                const isAdminPath = window.location.pathname.includes("/admin/");
+                const isUnlocked = document.body.innerText.includes("Logout") || window.isAdminUnlocked || document.querySelector('.logout-btn');
+                
+                if (isAdminPath && isUnlocked) {
+                    const card = document.getElementById("admin-maintenance-card");
+                    if (card) card.style.display = "block";
+                    clearInterval(checkUnlock);
+                }
+            }, 300);
+        });
+
+        async function submitMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Updating...";
+            statusEl.style.color = "#8b949e";
+            
+            const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
+            const reason = document.getElementById("maint-reason").value || "Under maintenance";
+            
+            let payload = {};
+            checkboxes.forEach(cb => { payload[cb.value] = reason; });
+
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
+                const response = await fetch(workerUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    statusEl.style.color = "#57F287";
+                    statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
+                } else {
+                    throw new Error("Failed");
+                }
+            } catch (err) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Error triggering update.";
+            }
         }
-    }, 500);
 
-    async function submitMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Updating...";
-        statusEl.style.color = "#8b949e";
-        const checkboxes = document.querySelectorAll('#maint-checkboxes input:checked');
-        const reason = document.getElementById("maint-reason").value || "Under maintenance";
-        let payload = {};
-        checkboxes.forEach(cb => { payload[cb.value] = reason; });
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET";
-            const response = await fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-            if (response.ok) {
+        async function clearMaintenance() {
+            const statusEl = document.getElementById("maint-status");
+            statusEl.innerText = "Clearing...";
+            statusEl.style.color = "#8b949e";
+            try {
+                const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
+                await fetch(workerUrl);
                 statusEl.style.color = "#57F287";
-                statusEl.innerText = "✅ Triggered! GitHub will update in ~45s.";
-            } else { throw new Error("Failed"); }
-        } catch (err) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Error triggering update.";
+                statusEl.innerText = "✅ Maintenance cleared!";
+            } catch (e) {
+                statusEl.style.color = "#ED4245";
+                statusEl.innerText = "❌ Failed to clear.";
+            }
         }
-    }
-
-    async function clearMaintenance() {
-        const statusEl = document.getElementById("maint-status");
-        if (!statusEl) return;
-        statusEl.innerText = "Clearing...";
-        statusEl.style.color = "#8b949e";
-        try {
-            const workerUrl = "https://github-outage-trigger.blueninja5135.workers.dev/?key=YOUR_SECRET&maintenance=false";
-            await fetch(workerUrl);
-            statusEl.style.color = "#57F287";
-            statusEl.innerText = "✅ Maintenance cleared!";
-        } catch (e) {
-            statusEl.style.color = "#ED4245";
-            statusEl.innerText = "❌ Failed to clear.";
-        }
-    }
-</script>
+    </script>
+</body>
+</html>
