@@ -1,6 +1,8 @@
 name: Outage Monitor
 
 on:
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       maintenance:
