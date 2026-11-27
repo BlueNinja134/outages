@@ -2,6 +2,12 @@ name: Outage Monitor
 
 on:
   workflow_dispatch:
+    inputs:
+      maintenance:
+        description: 'Set website to maintenance mode'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
@@ -37,6 +43,7 @@ jobs:
           MC_SERVER_IP: ${{ secrets.MC_SERVER_IP }}
           ALERT_ROLE_ID: ${{ secrets.ALERT_ROLE_ID }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          MAINTENANCE_MODE: ${{ github.event.inputs.maintenance }}
         run: python monitor.py
 
       - name: Save status state
