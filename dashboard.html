@@ -195,7 +195,7 @@
   .inc .len { font-weight: 600; }
   .inc .len.ongoing { color: var(--down); }
 
-  /* Admin Maintenance Card Styling matching original theme */
+  /* Admin Maintenance Card Styling */
   .admin-panel { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line); }
   .admin-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
   .admin-card h3 { margin: 0 0 6px; font-size: 1.125rem; font-weight: 600; }
@@ -285,7 +285,6 @@
   let data = null;
   let timers = [];
 
-  // ---------- crypto ----------
   const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
   async function decrypt(b, pw) {
@@ -297,7 +296,6 @@
     return JSON.parse(new TextDecoder().decode(plain));
   }
 
-  // ---------- formatting ----------
   const nowSec = () => Math.floor(Date.now() / 1000);
   function dur(sec) {
     sec = Math.max(0, Math.floor(sec));
@@ -322,7 +320,6 @@
   };
   const LABEL = { up: "Operational", down: "Down", degraded: "Failing checks", unknown: "Unknown" };
 
-  // ---------- pieces ----------
   function strip(s) {
     const end = Date.parse(data.days_end + "T00:00:00Z");
     const n = s.days.length;
@@ -444,7 +441,6 @@
     $("#services").innerHTML = data.services.map(service).join("");
     $("#incidents").innerHTML = incidents();
     
-    // Admin maintenance panel rendered only when unlocked
     $("#admin-container").innerHTML = isAdmin ? `
       <div class="admin-panel">
         <div class="admin-card">
@@ -469,7 +465,6 @@
       `Uptime counts every failed check, including ones that did not trigger an alert.`;
   }
 
-  // ---------- flow ----------
   function show(view) {
     $("#lock").hidden = view !== "lock";
     $("#app").hidden = view !== "app";
@@ -504,7 +499,7 @@
       const isAdminUnlocked = blob.mode === "encrypted" && !!password;
       const payload = next.mode === "encrypted" ? await decrypt(next, password) : next.payload;
       if (payload.generated !== data.generated) { blob = next; data = payload; render(isAdminUnlocked); }
-    } catch (_) { /* offline or file:// preview */ }
+    } catch (_) {}
   }
 
   $("#lock-form").addEventListener("submit", async (e) => {
@@ -528,7 +523,6 @@
   });
   $("#lock-btn").addEventListener("click", lock);
 
-  // ---------- maintenance api actions ----------
   window.submitMaintenance = async function() {
     const statusEl = $("#maint-status");
     statusEl.textContent = "Updating...";
